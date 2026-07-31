@@ -3,17 +3,17 @@ struct Params {   // 48 bytes total
   width:     f32, // bytes  0 -  3 (block 1)
   height:    f32, // bytes  4 -  7
   maxIter:   f32, // bytes  8 - 11
-	subStep:   f32, // bytes 12 - 15
+  subStep:   f32, // bytes 12 - 15
 
   zoomHi:    f32, // bytes 16 - 19 (block 2)
-	zoomLo:    f32, // bytes 20 - 23
+  zoomLo:    f32, // bytes 20 - 23
   targetXHi: f32, // bytes 24 - 27
   targetYHi: f32, // bytes 28 - 31
 
-	targetXLo: f32, // bytes 32 - 35 (block 3)
-	targetYLo: f32, // bytes 36 - 39
-	pad0:      f32, // bytes 40 - 43
-	pad1:      f32, // bytes 44 - 47
+  targetXLo: f32, // bytes 32 - 35 (block 3)
+  targetYLo: f32, // bytes 36 - 39
+  pad0:      f32, // bytes 40 - 43
+  pad1:      f32, // bytes 44 - 47
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -25,16 +25,16 @@ struct Params {   // 48 bytes total
 // emulates addition of two double-single values
 fn ds_add(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   let s = a.x + b.x;
-	let v = s - a.x;
-	let e = (a.x - (s - v)) + (b.x - v) + a.y + b.y;
-	return vec2<f32>(s + e, e - ((s + e) - s));
+  let v = s - a.x;
+  let e = (a.x - (s - v)) + (b.x - v) + a.y + b.y;
+  return vec2<f32>(s + e, e - ((s + e) - s));
 }
 
 // emulates multiplication of two double-single values
 fn ds_mul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   let c = a.x * b.x;
-	let e = fma(a.x, b.x, -c) + a.x * b.y + a.y * b.x;
-	return vec2<f32>(c + e, e - ((c + e) - c));
+  let e = fma(a.x, b.x, -c) + a.x * b.y + a.y * b.x;
+  return vec2<f32>(c + e, e - ((c + e) - c));
 }
 
 // converts a single standard f32 to an emulated fp64 vec2
