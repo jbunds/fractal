@@ -1,6 +1,6 @@
 module mandelbrot/gogpu
 
-go 1.26.5
+go 1.25.0
 
 require (
 	github.com/gogpu/gg v0.50.10
