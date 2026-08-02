@@ -16,7 +16,7 @@ struct params { // field declaration order must cohere with the corresponding Go
 };
 
 @group(0) @binding(0) var<uniform> p: params;
-@group(0) @binding(1) var<storage, read> palette: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read> palette: array<u32>;
 @group(1) @binding(0) var screenTex: texture_storage_2d<bgra8unorm, write>;
 
 // emulated 64-bit floating-point math functions
@@ -103,8 +103,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let dyn_div     = 80.0 + (p.frameCounter * 0.5);
     let clamped_div = min(dyn_div, 600.0);
     let idx         = u32((iter / clamped_div) * f32(p.paletteSize)) % p.paletteSize;
-    color           = palette[idx];
+    color           = unpack4x8unorm(palette[idx]);
   }
 
-  textureStore(screenTex, vec2<i32>(id.xy), color);
+  textureStore(screenTex, vec2<u32>(id.xy), color);
 }

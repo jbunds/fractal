@@ -55,7 +55,7 @@ func main() {
 	var (
 		setupOnce sync.Once
 
-		paletteData []float32
+		paletteData []uint32
 
 		// singletons required by OnDraw()
 		paletteBuf      *wgpu.Buffer
@@ -104,8 +104,8 @@ func main() {
 			staticBindGroup, err = device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 				Layout:  bgLayout0,
 				Entries: []wgpu.BindGroupEntry{
-					{Binding: 0, Size: 48,                          Buffer: uniformBuf},
-					{Binding: 1, Size: uint64(paletteSize * 4 * 4), Buffer: paletteBuf},
+					{Binding: 0, Size: 48,                      Buffer: uniformBuf},
+					{Binding: 1, Size: uint64(paletteSize * 4), Buffer: paletteBuf},
 				},
 			})
 			if err != nil { panic(err) }
@@ -124,8 +124,19 @@ func main() {
 
 		// update uniforms (zoom logic)
 
-		surfaceWidth, surfaceHeight := dc.SurfaceSize()
-		unis                        := updateUniforms(frameCounter, surfaceWidth, surfaceHeight, targetXHi, targetXLo, targetYHi, targetYLo, newZoom, iterations)
+		surfaceWidth,
+		surfaceHeight := dc.SurfaceSize()
+		unis          := updateUniforms(
+			frameCounter,
+			surfaceWidth,
+			surfaceHeight,
+			targetXHi,
+			targetXLo,
+			targetYHi,
+			targetYLo,
+			newZoom,
+			iterations,
+		)
 
 		device.Queue().WriteBuffer(uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&unis)), 48))
 
@@ -163,7 +174,17 @@ func main() {
 }
 
 // setup initializes all of the resources consumed by the GPU shader.
-func setup(device *wgpu.Device, iterations float64) ([]float32, *wgpu.Buffer, *wgpu.Buffer, *wgpu.BindGroupLayout, *wgpu.BindGroupLayout, *wgpu.ComputePipeline) {
+func setup(
+	device     *wgpu.Device,
+	iterations float64,
+) (
+	[]uint32,
+	*wgpu.Buffer,
+	*wgpu.Buffer,
+	*wgpu.BindGroupLayout,
+	*wgpu.BindGroupLayout,
+	*wgpu.ComputePipeline,
+) {
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{WGSL: shaderCode})
 	if err != nil { panic(err) }
 
@@ -177,20 +198,21 @@ func setup(device *wgpu.Device, iterations float64) ([]float32, *wgpu.Buffer, *w
 }
 
 // initPalette initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
-func initPalette(iterations float64) []float32 {
-	data := make([]float32, paletteSize * 4)
+func initPalette(iterations float64) []uint32 {
+	data := make([]uint32, paletteSize)
 	for i := range paletteSize {
 		iterations := float64(i) * (iterations / float64(paletteSize))
-		data[i * 4 + 0] = float32((math.Sin(0.015 * iterations + 1.0) * 127 + 128) / 255)
-		data[i * 4 + 1] = float32((math.Sin(0.012 * iterations + 2.0) * 127 + 128) / 255)
-		data[i * 4 + 2] = float32((math.Sin(0.010 * iterations + 4.0) * 127 + 128) / 255)
-		data[i * 4 + 3] = 1
+		a := uint32(255)
+		r := uint32(math.Sin(0.015 * iterations + 1.0) * 127 + 128)
+		g := uint32(math.Sin(0.012 * iterations + 2.0) * 127 + 128)
+		b := uint32(math.Sin(0.010 * iterations + 4.0) * 127 + 128)
+		data[i] = r | (g << 8) | (b << 16) | (a << 24)
 	}
 	return data
 }
 
 // initPaletteBuf initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
-func initPaletteBuf(device *wgpu.Device, iterations float64) ([]float32, *wgpu.Buffer) {
+func initPaletteBuf(device *wgpu.Device, iterations float64) ([]uint32, *wgpu.Buffer) {
 	paletteData     := initPalette(iterations)
 	paletteBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Size:  uint64(len(paletteData) * 4),
