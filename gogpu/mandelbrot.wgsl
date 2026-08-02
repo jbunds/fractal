@@ -1,6 +1,6 @@
 struct params { // field declaration order must cohere with the corresponding Go struct field declaration order
   paletteSize:  u32,
-	frameCounter: f32,
+  frameCounter: f32,
   iterations:   f32,
   pad:          f32,
 
@@ -101,8 +101,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     color   = vec4<f32>(0.0, 0.0, 0.0, 1.0);
   } else {
     let dyn_div     = 80.0 + (p.frameCounter * 0.5);
-		let clamped_div = min(dyn_div, 600.0);
-		let idx         = u32((iter / clamped_div) * f32(p.paletteSize)) % p.paletteSize;
+    let clamped_div = min(dyn_div, 600.0);
+    let idx         = u32((iter / clamped_div) * f32(p.paletteSize)) % p.paletteSize;
     color           = palette[idx];
   }
 
