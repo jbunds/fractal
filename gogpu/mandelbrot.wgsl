@@ -81,15 +81,15 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   if (id.x >= u32(p.width) || id.y >= u32(p.height)) { return; }
 
   let screenX = f32(id.x);
-  let screenY = f32(p.height) - f32(id.y);
+  let screenY = f32(id.y);
   let minDim  = min(p.width, p.height);
 
   let zoom    = vec2<f32>(p.zoomHi,    p.zoomLo);
   let targetX = vec2<f32>(p.targetXHi, p.targetXLo);
   let targetY = vec2<f32>(p.targetYHi, p.targetYLo);
 
-  let scaleX  = to_dd((screenX - (p.width  / 2.0)) / minDim);
-  let scaleY  = to_dd((screenY - (p.height / 2.0)) / minDim);
+  let scaleX  = to_dd((screenX - (p.width / 2.0)) / minDim);
+  let scaleY  = to_dd((p.height / 2.0 - screenY)  / minDim);
 
   let cx      = dd_add(targetX, dd_mul(scaleX, zoom));
   let cy      = dd_add(targetY, dd_mul(scaleY, zoom));
