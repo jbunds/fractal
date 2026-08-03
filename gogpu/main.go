@@ -38,8 +38,7 @@ type uniforms struct { // total: 4 bytes * (1 uint32 field + 11 float32 fields) 
 }
 
 func main() {
-
-	coords, err  := flags(flag.CommandLine, os.Args[1:])
+	coords, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
 		os.Exit(1)
@@ -47,7 +46,7 @@ func main() {
 	targetX := coords.x
 	targetY := coords.y
 
-	app     := gogpu.NewApp(gogpu.DefaultConfig().
+	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle(fmt.Sprintf("mandelbrot - %s", coords.name)).
 		WithSize(width, height).
 		WithContinuousRender(true))
@@ -68,31 +67,29 @@ func main() {
 		canvas          *ggcanvas.Canvas
 	)
 
-	frameCounter  := 1
-	stopRendering := false // TODO(jbunds): clean this up: investigate using, e.g., the token-based StartAnimation approach instead of calling WithContinuousRender
-	newZoom       := initialZoom
-	targetXHi,
-	targetXLo     := splitFloat64(targetX)
-	targetYHi,
-	targetYLo     := splitFloat64(targetY)
+	frameCounter         := 0
+	stopRendering        := false // TODO(jbunds): clean this up: investigate using, e.g., the token-based StartAnimation approach instead of calling WithContinuousRender
+	newZoom              := initialZoom
+	targetXHi, targetXLo := splitFloat64(targetX)
+	targetYHi, targetYLo := splitFloat64(targetY)
 
 	app.OnDraw(func(dc *gogpu.Context) {
 
 		if stopRendering { return } // reduce GPU load without exiting the application
 
+		frameCounter++
 		iterations := float64(baseIter) + float64(frameCounter) * growthRate
 
 		setupOnce.Do(func() {
 			device = app.DeviceProvider().Device()
 
 			paletteData,
-			paletteBuf,
-			uniformBuf,
-			bgLayout0,
-			bgLayout1,
-			pipeline = setup(device, iterations)
+				paletteBuf,
+				uniformBuf,
+				bgLayout0,
+				bgLayout1,
+				pipeline = setup(device, iterations)
 
-			var err error
 			canvas, err = ggcanvas.New(app.GPUContextProvider(), width, height)
 			if err != nil { panic(err) }
 
@@ -102,7 +99,7 @@ func main() {
 			device.Queue().WriteBuffer(paletteBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&paletteData[0])), len(paletteData) * 4))
 
 			staticBindGroup, err = device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-				Layout:  bgLayout0,
+				Layout: bgLayout0,
 				Entries: []wgpu.BindGroupEntry{
 					{Binding: 0, Size: 48,                      Buffer: uniformBuf},
 					{Binding: 1, Size: uint64(paletteSize * 4), Buffer: paletteBuf},
@@ -111,7 +108,7 @@ func main() {
 			if err != nil { panic(err) }
 		})
 
-		if frameCounter++; frameCounter > 2745 { // TODO(jbunds): programmatically determine the value of this magic number via other parameters
+		if frameCounter > 2745 { // TODO(jbunds): programmatically determine the value of this magic number via other parameters
 			stopRendering = true
 			if staticBindGroup != nil { staticBindGroup.Release() }
 			fmt.Println("stopped rendering")
@@ -124,9 +121,8 @@ func main() {
 
 		// update uniforms (zoom logic)
 
-		surfaceWidth,
-		surfaceHeight := dc.SurfaceSize()
-		unis          := updateUniforms(
+		surfaceWidth, surfaceHeight := dc.SurfaceSize()
+		unis                        := updateUniforms(
 			frameCounter,
 			surfaceWidth,
 			surfaceHeight,
@@ -142,9 +138,10 @@ func main() {
 
 		transientBindGroup, err := device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Layout:  bgLayout1,
-			Entries: []wgpu.BindGroupEntry{
-				{Binding: 0, TextureView: dc.SurfaceView()},
-			},
+			Entries: []wgpu.BindGroupEntry{{
+				Binding:     0,
+				TextureView: dc.SurfaceView(),
+			}},
 		})
 		if err != nil { panic(err) }
 
@@ -170,7 +167,9 @@ func main() {
 		if staticBindGroup != nil { staticBindGroup.Release() }
 	})
 
-	if err := app.Run(); err != nil { panic(err) }
+	if err := app.Run(); err != nil {
+		panic(err)
+	}
 }
 
 // setup initializes all of the resources consumed by the GPU shader.
@@ -257,8 +256,8 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 				Format: gputypes.TextureFormatBGRA8Unorm,
 				Access: gputypes.StorageTextureAccessWriteOnly,
 			},
-		},
-	}})
+		}},
+	})
 	if err != nil { panic(err) }
 	return bgLayout0, bgLayout1
 }
@@ -286,9 +285,9 @@ func initPipeline(device *wgpu.Device, layout *wgpu.PipelineLayout, shader *wgpu
 // updateUniforms updates the uniforms passed to the GPU shader.
 func updateUniforms(
 	frameCounter                               int,
-	width, height                              uint32,
+	width,     height                          uint32,
 	targetXHi, targetXLo, targetYHi, targetYLo float32,
-	zoom, iterations                           float64) uniforms {
+	zoom,      iterations                      float64) uniforms {
 
 	zoomHi, zoomLo := splitFloat64(zoom)
 
