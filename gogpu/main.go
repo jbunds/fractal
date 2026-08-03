@@ -10,6 +10,7 @@ import (
 	"sync"
 	"unsafe"
 
+	_ "github.com/gogpu/gg/gpu" // enable GPU-bound rendering and rasterized tiles
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
@@ -158,7 +159,10 @@ func main() {
 
 		device.Queue().Submit(cmds)
 
-		canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
+		err = canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 
 		transientBindGroup.Release()
 	})
