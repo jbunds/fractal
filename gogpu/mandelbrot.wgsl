@@ -1,3 +1,7 @@
+// TODO(jbunds): implement efficient anti-aliasing
+//
+// i tried implementing both 4x SSAA and FXAA, but the results were inadequate, and the adverse performance impact was unacceptable
+
 struct params { // field declaration order must cohere with the corresponding Go struct field declaration order
   paletteSize:  u32,
   frameCounter: f32,
