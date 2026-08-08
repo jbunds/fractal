@@ -18,7 +18,7 @@ import (
 	_ "github.com/gogpu/gg/gpu" // enable GPU-bound rendering and rasterized tiles
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gg/integration/ggcanvas"
-	"github.com/gogpu/gogpu" // https://pkg.go.dev/github.com/gogpu/gogpu#readme-ecosystem
+	"github.com/gogpu/gogpu"    // https://pkg.go.dev/github.com/gogpu/gogpu#readme-ecosystem
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
 )
@@ -120,7 +120,7 @@ func main() {
 			app.Quit()
 		}
 		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
-			if animToken.Load() != nil { // stop animating while the primary window is hidden to reduce GPU load
+			if animToken.Load() != nil {                 // reduce GPU load by suspending animation while the primary window is hidden
 				animToken.Swap(nil)
 			}
 			app.PrimaryWindow().Hide()
@@ -144,7 +144,7 @@ func main() {
 		go func() {
 			runtime.Gosched()
 			if animToken.Load() != nil {
-				app.RequestRedraw() // renders at VSync (~60 FPS)
+				app.RequestRedraw() // renders at VSync frequency (~60 FPS)
 			}
 		}()
 
@@ -325,7 +325,7 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cc *atomic.Value, token *atomic
 	app.SetCustomMenu("points", pointsMenu)
 }
 
-// release deallocates resources (decrements internal reference count or immediately destroys the object's native handle).
+// release marks resources for deallocation.
 func (r *renderer) release() {
 	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
@@ -363,7 +363,8 @@ func updateUniforms(
 	}
 }
 
-// toggleAnimation toggles between pausing and resuming the animation loop, e.g., when the spacebar is pressed, or the primary window is hidden.
+// toggleAnimation toggles between pausing and resuming the animation loop,
+// e.g., when the spacebar is pressed, or when the primary window is hidden.
 func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]) {
 	if oldToken := token.Swap(nil); oldToken != nil {
 		oldToken.Stop()
