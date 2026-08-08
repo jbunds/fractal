@@ -116,7 +116,7 @@ func main() {
 			toggleAnimation(app, &animToken)
 		}
 		if key == gpucontext.KeyQ && mods.HasSuper() { // ⌘+q
-			currentRenderer.Load().(*renderer).release() // is this necessary?
+			currentRenderer.Load().(*renderer).release()
 			app.Quit()
 		}
 		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
@@ -330,6 +330,7 @@ func (r *renderer) release() {
 	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
 	r.assets.relFractalView()
+	r.gpu.pipeline.Release()
 	r.gpu.bgLayout0.Release()
 	r.gpu.bgLayout1.Release()
 	r.gpu.paletteBuf.Release()
