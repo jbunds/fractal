@@ -2,7 +2,7 @@ package main
 
 import (
 	"math"
-	_ "github.com/gogpu/gg/gpu" // enable GPU-bound rendering and rasterized tiles
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -20,7 +20,9 @@ func initResources(
 	*wgpu.ComputePipeline,
 ) {
 	shader, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{WGSL: shaderCode})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	paletteColors, paletteBuf := initPaletteBuf(device, iterations)
 	uniformBuf                := initUniformBuf(device)
@@ -52,7 +54,9 @@ func initPaletteBuf(device *wgpu.Device, iterations float64) ([]uint32, *wgpu.Bu
 		Size:  uint64(len(paletteColors) * 4),
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	return paletteColors, paletteBuf
 }
 
@@ -62,7 +66,9 @@ func initUniformBuf(device *wgpu.Device) *wgpu.Buffer {
 		Size:  48,
 		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	return uniformBuf
 }
 
@@ -77,11 +83,13 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 			}, { // pre-computed 2000-color palette
 				Binding:    1,
 				Visibility: wgpu.ShaderStageCompute,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage},
 			},
 		},
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	bgLayout1, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Entries: []wgpu.BindGroupLayoutEntry{{ // storage texture (physical screen)
@@ -93,7 +101,9 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 			},
 		}},
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	return bgLayout0, bgLayout1
 }
 
@@ -102,7 +112,9 @@ func initPipelineLayout(device *wgpu.Device, bgLayout0, bgLayout1 *wgpu.BindGrou
 	layout, err := device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		BindGroupLayouts: []*wgpu.BindGroupLayout{bgLayout0, bgLayout1},
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	return layout
 }
 
@@ -113,6 +125,8 @@ func initPipeline(device *wgpu.Device, layout *wgpu.PipelineLayout, shader *wgpu
 		Module:     shader,
 		EntryPoint: "main",
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	return pipeline
 }
