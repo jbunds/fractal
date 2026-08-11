@@ -26,8 +26,10 @@ import (
 var shaderCode string
 
 const (
-	width              = 800   // logical application window width
-	height             = 800   // logical application window height
+	width              = 800   // primary window logical width
+	height             = 800   // primary window logical height
+	aboutWidth         = 300   // about window logical width
+	aboutHeight        = 230   // about window logical height
 	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
 	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
 	initialZoom        = 3.0   // initial magnification factor of the rendered image
@@ -109,6 +111,9 @@ func main() {
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which appears to be triggered by customizing the menus per the call to app.SetCustomMenu() in addPointsMenu()
 		cr.addPointsMenu(app, &currentRenderer, &animToken, coords.name)
+
+		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
+		cr.appendAboutMenuItemToApplicationMenu(app)
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
@@ -360,7 +365,62 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cc *atomic.Value, token *atomic
 	}
 
 	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
+	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
 	app.SetCustomMenu("points", pointsMenu)
+}
+
+// appendAboutMenuItemToApplicationMenu appends an "About Mandelbrot" menu item to the
+// application menu which will render a small window with some text when selected.
+func (r *renderer) appendAboutMenuItemToApplicationMenu(app *gogpu.App) {
+	aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
+		WithTitle("About Mandelbrot").
+		WithSize(aboutWidth, aboutHeight).
+		WithResizable(false))
+	if err != nil {
+		panic(err)
+	}
+
+	aboutWin.Hide()
+
+//	// workaround suggested by @kolkov per https://github.com/orgs/gogpu/discussions/423#discussioncomment-17897613
+//	app.SetMenu(gogpu.NewMenu().
+//		AddItem(gogpu.MenuItem{Title: "About Mandelbrot", Action: func() { aboutWin.Show() }}).
+//		AddItem(gogpu.MenuItem{Separator: true}).
+//		AddItem(gogpu.MenuItem{Title: "Quit Mandelbrot", Role: gogpu.RoleQuit}))
+
+	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
+	appMenu.AddItem(gogpu.MenuItem{Separator: true})
+	appMenu.AddItem(gogpu.MenuItem{
+		Title:  "About Mandelbrot",
+		//Role:   gogpu.RoleAbout, // causes my custom window to be effectively discarded
+		Action: func() { aboutWin.Show() },
+	})
+
+	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
+	if err != nil {
+		panic(err)
+	}
+
+	cc := canvas.Context()
+	cc.SetFont(r.assets.fontSource.Face(16))
+	cc.SetColor(gg.White)
+	//cc.ClearWithColor(gg.White) // doesn't work, or at least doesn't behave as i expected according to the godoc; worked around via DrawRectangle call below
+	cc.DrawRectangle(0, 0, float64(aboutWidth), float64(aboutHeight))
+	cc.Fill()
+
+	cc.SetColor(gg.Black)
+	cc.SetStroke(gg.Bold())
+	cc.DrawString("Mandelbrot 1.0",   75,  80)
+	cc.DrawString("Jeff Bunds",       75, 120)
+	cc.DrawString("Copyright © 2026", 75, 160)
+	cc.Fill()
+
+	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
+		surfaceWidth, surfaceHeight := dc.SurfaceSize()
+		if err := canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight); err != nil {
+			panic(err)
+		}
+	})
 }
 
 // release marks resources for deallocation.
