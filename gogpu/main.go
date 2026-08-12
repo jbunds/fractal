@@ -1,4 +1,6 @@
 // Package mandelbrot/gogpu renders the Mandelbrot set and zooms in on preset coordinates.
+//
+// Tested on a MacBook Air M1.
 package main
 
 import (
@@ -26,10 +28,10 @@ import (
 var shaderCode string
 
 const (
-	width              = 800   // primary window logical width
-	height             = 800   // primary window logical height
-	aboutWidth         = 300   // about window logical width
-	aboutHeight        = 230   // about window logical height
+	mainWidth          = 800   // primary window logical width
+	mainHeight         = 800   // primary window logical height
+	aboutWidth         = 240   // about window logical width
+	aboutHeight        = 164   // about window logical height
 	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
 	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
 	initialZoom        = 3.0   // initial magnification factor of the rendered image
@@ -61,10 +63,10 @@ type gpu struct {
 
 // assets stores assets used to render frames (canvas, font, texture).
 type assets struct {
-	canvas         *ggcanvas.Canvas       // wraps gg.Context
-	fontSource     *text.FontSource       // font used to render per-frame stats
-	fractalView    gpucontext.TextureView // handle to the fractal texture view
-	relFractalView func()                 // fractal TextureView release function
+	canvas             *ggcanvas.Canvas       // wraps gg.Context
+	fontSource         *text.FontSource       // font used to render per-frame stats
+	fractalView        gpucontext.TextureView // handle to the fractal texture view
+	fractalViewRelease func()                 // fractal TextureView release function
 }
 
 // renderer stores most runtime state.
@@ -99,7 +101,7 @@ func main() {
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Mandelbrot").
 		WithTitle(fmt.Sprintf("mandelbrot - %s", coords.name)).
-		WithSize(width, height))
+		WithSize(mainWidth, mainHeight))
 
 	currentRenderer.Store(newRenderer(coords))
 
@@ -113,7 +115,7 @@ func main() {
 		cr.addPointsMenu(app, &currentRenderer, &animToken, coords.name)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
-		cr.appendAboutMenuItemToApplicationMenu(app)
+		cr.appendAboutMenuItem(app, &currentRenderer)
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
@@ -206,7 +208,7 @@ func (r *renderer) init(app *gogpu.App) {
 	r.gpu.bgLayout1       = bgLayout1
 	r.gpu.pipeline        = pipeline
 
-	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), width, height)
+	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), mainWidth, mainHeight)
 	if err != nil {
 		panic(err)
 	}
@@ -229,9 +231,11 @@ func (r *renderer) init(app *gogpu.App) {
 		panic(err)
 	}
 
-	r.assets.fractalView, r.assets.relFractalView = r.assets.canvas.Context().CreateOffscreenTexture(width, height)
-	if r.assets.relFractalView == nil {
-		panic("CreateOffscreenTexture failed (GPU unavailable)")
+	r.assets.fractalView,
+	r.assets.fractalViewRelease = r.assets.canvas.Context().CreateOffscreenTexture(mainWidth, mainHeight)
+
+	if r.assets.fractalViewRelease == nil {
+		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
 	}
 }
 
@@ -257,7 +261,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	unis := updateUniforms( // magnification logic
 		r.state.frameCount,
-		width, height,
+		mainWidth, mainHeight,
 		r.state.targetXHi, r.state.targetXLo,
 		r.state.targetYHi, r.state.targetYLo,
 		r.state.zoom,
@@ -272,9 +276,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	fractalViewBindGroup := r.fractalViewBindGroup()
 	defer fractalViewBindGroup.Release()
 
-	surfaceWidth, surfaceHeight := dc.SurfaceSize() // https://pkg.go.dev/github.com/gogpu/gogpu#App.ScaleFactor
-
-	// encode & dispatch
 	encoder, err := r.gpu.device.CreateCommandEncoder(nil)
 	if err != nil {
 		panic(err)
@@ -288,7 +289,10 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	pass.SetPipeline(r.gpu.pipeline)
 	pass.SetBindGroup(0, r.gpu.staticBindGroup,  nil)
 	pass.SetBindGroup(1, fractalViewBindGroup, nil)
-	pass.Dispatch(((surfaceWidth + 15) / 16), ((surfaceHeight + 7) / 8), 1)
+
+	width, height := dc.SurfaceSize() // https://pkg.go.dev/github.com/gogpu/gogpu#App.ScaleFactor
+
+	pass.Dispatch(((width + 15) / 16), ((height + 7) / 8), 1)
 
 	err = pass.End()
 	if err != nil {
@@ -304,7 +308,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	r.drawStats()
 
-	err = r.assets.canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
+	err = r.assets.canvas.RenderDirect(dc.RenderTarget().SurfaceView(), width, height)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
@@ -328,16 +332,16 @@ func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
 // drawStatus draws a rectangular box in the bottom-left corner of the main window showing some basic runtime stats.
 func (r *renderer) drawStats() {
 	err := r.assets.canvas.Draw(func(cc *gg.Context) {
-		cc.DrawGPUTextureBase(r.assets.fractalView, 0, 0, width, height)
+		cc.DrawGPUTextureBase(r.assets.fractalView, 0, 0, mainWidth, mainHeight)
 		cc.SetRGBA(0, 0, 0, 0.15)
-		cc.DrawRoundedRectangle(10, height - 40, 336, 30, 4)
+		cc.DrawRoundedRectangle(10, mainHeight - 40, 336, 30, 4)
 		cc.Fill()
-		cc.SetColor(gg.Red)
-		cc.DrawString(fmt.Sprintf("FPS: %.0f",             r.state.fps       ),  18, height - 20)
+		cc.SetColor(gg.Cyan)
+		cc.DrawString(fmt.Sprintf("FPS: %.0f",             r.state.fps       ),  18, mainHeight - 20)
 		cc.SetColor(gg.Green)
-		cc.DrawString(fmt.Sprintf("magnification: %e", 1 / r.state.zoom      ),  72, height - 20)
-		cc.SetColor(gg.Yellow)
-		cc.DrawString(fmt.Sprintf("frames: %d",            r.state.frameCount), 258, height - 20)
+		cc.DrawString(fmt.Sprintf("magnification: %e", 1 / r.state.zoom      ),  72, mainHeight - 20)
+		cc.SetColor(gg.Cyan)
+		cc.DrawString(fmt.Sprintf("frames: %d",            r.state.frameCount), 258, mainHeight - 20)
 	})
 	if err != nil {
 		panic(err)
@@ -345,14 +349,14 @@ func (r *renderer) drawStats() {
 }
 
 // addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
-func (r *renderer) addPointsMenu(app *gogpu.App, cc *atomic.Value, token *atomic.Pointer[gogpu.AnimationToken], item string) {
+func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, token *atomic.Pointer[gogpu.AnimationToken], item string) {
 	points     := pointsOfInterest()
 	pointsMenu := gogpu.NewMenuWithTitle("Points")
 
 	for _, v := range slices.Sorted(maps.Keys(points)) {
 		pointsMenu.AddItem(gogpu.MenuItem{Title: v, Disabled: v == item, Action: func() {
 			newRenderer := newRenderer(points[v])
-			oldRenderer := cc.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
+			oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
 			oldRenderer.release()
 			newRenderer.init(app)
 			app.SetTitle(fmt.Sprintf("mandelbrot - %s", v))
@@ -369,12 +373,13 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cc *atomic.Value, token *atomic
 	app.SetCustomMenu("points", pointsMenu)
 }
 
-// appendAboutMenuItemToApplicationMenu appends an "About Mandelbrot" menu item to the
-// application menu which will render a small window with some text when selected.
-func (r *renderer) appendAboutMenuItemToApplicationMenu(app *gogpu.App) {
+// appendAboutMenuItem appends an "About Mandelbrot" menu item to the application
+// menu which renders a small window with some text when selected.
+func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
 		WithTitle("About Mandelbrot").
 		WithSize(aboutWidth, aboutHeight).
+		WithTransparent(true).
 		WithResizable(false))
 	if err != nil {
 		panic(err)
@@ -382,16 +387,10 @@ func (r *renderer) appendAboutMenuItemToApplicationMenu(app *gogpu.App) {
 
 	aboutWin.Hide()
 
-//	// workaround suggested by @kolkov per https://github.com/orgs/gogpu/discussions/423#discussioncomment-17897613
-//	app.SetMenu(gogpu.NewMenu().
-//		AddItem(gogpu.MenuItem{Title: "About Mandelbrot", Action: func() { aboutWin.Show() }}).
-//		AddItem(gogpu.MenuItem{Separator: true}).
-//		AddItem(gogpu.MenuItem{Title: "Quit Mandelbrot", Role: gogpu.RoleQuit}))
-
 	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
 	appMenu.AddItem(gogpu.MenuItem{Separator: true})
 	appMenu.AddItem(gogpu.MenuItem{
-		Title:  "About Mandelbrot",
+		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot", but not "\u2139  About Mandelbrot"
 		//Role:   gogpu.RoleAbout, // causes my custom window to be effectively discarded
 		Action: func() { aboutWin.Show() },
 	})
@@ -401,33 +400,99 @@ func (r *renderer) appendAboutMenuItemToApplicationMenu(app *gogpu.App) {
 		panic(err)
 	}
 
-	cc := canvas.Context()
-	cc.SetFont(r.assets.fontSource.Face(16))
-	cc.SetColor(gg.White)
-	//cc.ClearWithColor(gg.White) // doesn't work, or at least doesn't behave as i expected according to the godoc; worked around via DrawRectangle call below
-	cc.DrawRectangle(0, 0, float64(aboutWidth), float64(aboutHeight))
-	cc.Fill()
+	var (
+		view     *gpucontext.TextureView
+		release  func()
+		rendered bool
+	)
 
-	cc.SetColor(gg.Black)
-	cc.SetStroke(gg.Bold())
-	cc.DrawString("Mandelbrot 1.0",   75,  80)
-	cc.DrawString("Jeff Bunds",       75, 120)
-	cc.DrawString("Copyright © 2026", 75, 160)
-	cc.Fill()
+	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
+	offsetX := mainWidth  / 2.0 - aboutWidth  / 2.0
+	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
 
 	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
-		surfaceWidth, surfaceHeight := dc.SurfaceSize()
-		if err := canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight); err != nil {
+		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Points" menu before selecting the About menu item
+		err := canvas.Draw(func(cc *gg.Context) {
+			if !rendered {
+				view, release = ar.renderAboutWindow(cc)
+			}
+			cc.MarkFrameRendered()
+			rendered = true
+
+			// composite the About window TextureView atop the background
+
+			cc.Push() // save pre-translation state
+			cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
+			cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
+			cc.Pop() // restore pre-translation state so the overlay and text remain unaffected by the translation
+			cc.SetRGBA(0, 0, 0, 0.6)
+			cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
+			cc.Fill()
+			cc.DrawGPUTexture(*view, 0, 0, aboutWidth, aboutHeight)
+		})
+		if err != nil {
 			panic(err)
 		}
+		if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
+			panic(err)
+		}
+		app.RequestRedraw()
 	})
+
+	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
+	// despite what the godoc claims, when the "About Mandelbrot" window is focused and ⌘+w is pressed, the primary window closes
+	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
+		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
+			aboutWin.Close() // aboutWin.Hide() ?
+		}
+	})
+
+	aboutWin.SetOnClose(func() bool {
+		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
+		if release != nil {
+			release()
+		}
+		return true
+	})
+}
+
+// renderAboutWindow renders the About window content to an off-screen texture.
+func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, func()) {
+	view, release := cc.CreateOffscreenTexture(aboutWidth, aboutHeight)
+	if release == nil {
+		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
+	}
+
+	cc.BeginGPUFrame()
+	cc.ClearWithColor(gg.Transparent)
+
+	// background
+	cc.SetColor(gg.Transparent)
+	cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
+	cc.Fill()
+
+	// foreground
+	cc.SetColor(gg.White)
+	cc.SetFont(r.assets.fontSource.Face(10))
+	cc.DrawString("Mandelbrot 1.0",   15, 24)
+	cc.DrawString("Jeff Bunds",       15, 44)
+	cc.DrawString("Copyright © 2026", 15, 64)
+	cc.Fill()
+
+	if err := cc.FlushGPUWithViewPreserveContent(view, aboutWidth, aboutHeight); err != nil {
+		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
+	}
+	return &view, release
 }
 
 // release marks resources for deallocation.
 func (r *renderer) release() {
+	if r.assets.fractalViewRelease != nil {
+		r.assets.fractalViewRelease()
+	}
 	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
-	r.assets.relFractalView()
 	r.gpu.pipeline.Release()
 	r.gpu.bgLayout0.Release()
 	r.gpu.bgLayout1.Release()
