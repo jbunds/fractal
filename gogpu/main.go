@@ -111,7 +111,8 @@ func main() {
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app)
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
-		//                which appears to be triggered by customizing the menus per the call to app.SetCustomMenu() in addPointsMenu()
+		//                which may be triggered by customizing the menus per
+		//                the call to app.SetCustomMenu() in addPointsMenu() ?
 		cr.addPointsMenu(app, &currentRenderer, &animToken, coords.name)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
@@ -314,21 +315,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	}
 }
 
-// fractalViewBindGroup creates bind group holding the per-frame texture view of the rendered fractal.
-func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
-	fractalViewBindGroup, err := r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Layout: r.gpu.bgLayout1,
-		Entries: []wgpu.BindGroupEntry{{
-			Binding:     0,
-			TextureView: (*wgpu.TextureView)(r.assets.fractalView.Pointer()),
-		}},
-	})
-	if err != nil {
-		panic(err)
-	}
-	return fractalViewBindGroup
-}
-
 // drawStatus draws a rectangular box in the bottom-left corner of the main window showing some basic runtime stats.
 func (r *renderer) drawStats() {
 	err := r.assets.canvas.Draw(func(cc *gg.Context) {
@@ -390,7 +376,7 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
 	appMenu.AddItem(gogpu.MenuItem{Separator: true})
 	appMenu.AddItem(gogpu.MenuItem{
-		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot", but not "\u2139  About Mandelbrot"
+		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot"
 		//Role:   gogpu.RoleAbout, // causes my custom window to be effectively discarded
 		Action: func() { aboutWin.Show() },
 	})
@@ -440,7 +426,13 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	})
 
 	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-	// despite what the godoc claims, when the "About Mandelbrot" window is focused and ⌘+w is pressed, the primary window closes
+	//
+	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
+	// "About Mandelbrot" window is focused and ⌘+w is pressed, the primary window closes
+	//
+	// TODO(jbunds): intercept ⌘+w and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+w is pressed
+	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
+	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
 	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
 		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
@@ -484,6 +476,21 @@ func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, f
 		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
 	}
 	return &view, release
+}
+
+// fractalViewBindGroup creates the BindGroup holding the per-frame TextureView of the rendered fractal.
+func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
+	fractalViewBindGroup, err := r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Layout: r.gpu.bgLayout1,
+		Entries: []wgpu.BindGroupEntry{{
+			Binding:     0,
+			TextureView: (*wgpu.TextureView)(r.assets.fractalView.Pointer()),
+		}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return fractalViewBindGroup
 }
 
 // release marks resources for deallocation.
