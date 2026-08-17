@@ -50,14 +50,14 @@ const (
 
 // state stores the application state (uniforms, color palette, and FPS stats).
 type state struct {
-	frameCount                int      // tracks the number of frames rendered
-	paletteColors             []uint32 // pre-computed color palette
-	viewportWidth,                     // viewportWidth tracks the width of the current frame's view of the complex plane
-	fps                       float64  // fps imprecisely tracks FPS rendered
-	targetXHi,     targetYHi,
-	targetXLo,     targetYLo  float32  // target coordinates of the Mandelbrot set
-	cRealHi,       cRealLo,
-	cImagHi,       cImagLo    float32  // complex constant term of the Julia set
+	frameCount            int      // tracks the number of frames rendered
+	paletteColors         []uint32 // pre-computed color palette
+	viewportWidth,                 // tracks the width of the current frame's view of the complex plane
+	fps                   float64  // fps imprecisely tracks FPS rendered
+	targetXHi, targetYHi,
+	targetXLo, targetYLo  float32  // target coordinates of the Mandelbrot set
+	cRealHi,   cRealLo,
+	cImagHi,   cImagLo    float32  // complex constant term of the Julia set
 }
 
 // gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
