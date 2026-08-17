@@ -16,7 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gg"
-	_ "github.com/gogpu/gg/gpu" // enable GPU-bound rendering and rasterized tiles
+	_ "github.com/gogpu/gg/gpu"
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
