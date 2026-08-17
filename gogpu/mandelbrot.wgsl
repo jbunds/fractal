@@ -4,7 +4,7 @@ fn mandelbrot(cx: vec2<f32>, cy: vec2<f32>) -> f32 {
   var x2 = vec2<f32>(0.0);
   var y2 = vec2<f32>(0.0);
 
-  let limit = u32(p.iterations);
+  let limit = u32(unis.iterations);
   var i     = 0u;
 
   for (; i < limit; i++) {
@@ -17,40 +17,38 @@ fn mandelbrot(cx: vec2<f32>, cy: vec2<f32>) -> f32 {
     if (x2.x + y2.x > 4.0) { break; }
   }
 
-  if (i >= limit) { return p.iterations; }
+  if (i >= limit) { return unis.iterations; }
 
-  return f32(i) + 1.0 - log2(log2(x2.x + y2.x) * 0.5);
+  return smoothIter(i, x2, y2);
 }
 
 @compute @workgroup_size(16, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= u32(p.width) || id.y >= u32(p.height)) { return; }
+  if (id.x >= u32(unis.width) || id.y >= u32(unis.height)) { return; }
 
   let screenX = f32(id.x);
   let screenY = f32(id.y);
-  let minDim  = min(p.width, p.height);
+  let minDim  = min(unis.width, unis.height);
 
-  let zoom    = vec2<f32>(p.zoomHi,    p.zoomLo);
-  let targetX = vec2<f32>(p.targetXHi, p.targetXLo);
-  let targetY = vec2<f32>(p.targetYHi, p.targetYLo);
+  let scale   = vec2<f32>(unis.scaleHi,   unis.scaleLo);
+  let targetX = vec2<f32>(unis.targetXHi, unis.targetXLo);
+  let targetY = vec2<f32>(unis.targetYHi, unis.targetYLo);
 
-  let scaleX  = to_dd((screenX - (p.width / 2.0)) / minDim);
-// TODO(jbunds): determine why the y-axis is inverted here but not in the Julia set
-//  let scaleY  = to_dd((screenY - (p.height / 2.0)) / minDim);
-  let scaleY  = to_dd((p.height / 2.0 - screenY)  / minDim);
+  let scaleX  = to_dd((screenX - (unis.width / 2.0)) / minDim);
+  let scaleY  = to_dd((unis.height / 2.0 - screenY)  / minDim); // y-axis inverted; maps WebGPU coordinates to cartesian coordinates
 
-  let cx      = dd_add(targetX, dd_mul(scaleX, zoom));
-  let cy      = dd_add(targetY, dd_mul(scaleY, zoom));
+  let cx      = dd_add(targetX, dd_mul(scaleX, scale));
+  let cy      = dd_add(targetY, dd_mul(scaleY, scale));
 
   let iter    = mandelbrot(cx, cy);
 
   var color: vec4<f32>;
-  if (iter >= p.iterations) {
-    color   = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+  if (iter >= unis.iterations) {
+    color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
   } else {
-    let dyn_div     = 80.0 + (p.frameCounter * 0.5);
-    let clamped_div = min(dyn_div, p.iterations);
-    let idx         = u32((iter / clamped_div) * f32(p.paletteSize)) % p.paletteSize;
+    let dyn_div     = 80.0 + (unis.frameCounter * 0.4);
+    let clamped_div = min(dyn_div, unis.iterations);
+    let idx         = u32((iter / clamped_div) * f32(unis.paletteSize)) % unis.paletteSize;
     color           = unpack4x8unorm(palette[idx]);
   }
 

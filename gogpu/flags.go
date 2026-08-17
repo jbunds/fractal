@@ -18,9 +18,6 @@ type coords struct {
 
 // pointsOfInterest returns a slice of named x, y coordinates of canonical points of interest in the Mandelbrot and filled Julia sets.
 func pointsOfInterest() map[string]map[string]coords {
-	// TODO(jbunds): find the best-looking coordinates for deep magnification within the precision constraints.
-	//               Misiurewicz points are generally interesting points, so find highly-precise coordinates for those
-	//               (Fractint or Kalles Fraktaler can maybe help identify those coordinates).
 	points := map[string]map[string]coords{
 		"mandelbrot": {
 			"spiral":    {name: "spiral",           x: -0.088,             y: 0.6555           }, // default
@@ -34,9 +31,9 @@ func pointsOfInterest() map[string]map[string]coords {
 		"julia": {
 			"spiral":   {name: "spiral",      cReal: -0.8,      cImag:  0.156   }, // default
 			"airplane": {name: "airplane",    cReal: -0.12,     cImag:  0.74    },
+			"basilica": {name: "basilica",    cReal: -0.75,     cImag:  0.0     },
 			"cantor":   {name: "cantor dust", cReal:  0.4,      cImag:  0.1     },
 			"dendrite": {name: "dendrite",    cReal: -0.4,      cImag:  0.6     },
-			"basilica": {name: "basilica",    cReal: -0.75,     cImag:  0.0     },
 			"rabbit":   {name: "rabbit",      cReal: -0.123,    cImag:  0.745   },
 			"siegel":   {name: "siegel",      cReal: -0.390541, cImag: -0.586788},
 		},

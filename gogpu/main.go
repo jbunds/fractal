@@ -42,23 +42,22 @@ const (
 	aboutHeight        = 164   // about window logical height
 	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
 	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
-	// TODO(jbunds): change the name of "initialZoom", since it actually represents the viewport width of the initial frame
-	initialZoom        = 3.0   // viewport width of the initial frame <!--initial magnification factor of the rendered image-->
-	zoomFactor         = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
+	viewportWidth      = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
+	scaleFactor        = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
 	growthRate         = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame
 	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
 // state stores the application state (uniforms, color palette, and FPS stats).
 type state struct {
-	frameCount            int      // tracks the number of frames rendered
-	paletteColors         []uint32 // pre-computed color palette
-	// TODO(jbunds): change the name of the "zoom" field since it actually represents the viewport width of the current frame
-	zoom,      fps        float64  // zoom tracks the magnification factor of the current frame; fps imprecisely tracks FPS rendered
-	targetXHi, targetYHi,
-	targetXLo, targetYLo  float32  // target coordinates of the Mandelbrot set
-	cRealHi,   cRealLo,
-	cImagHi,   cImagLo    float32  // complex constant term of the Julia set
+	frameCount                int      // tracks the number of frames rendered
+	paletteColors             []uint32 // pre-computed color palette
+	viewportWidth,                     // viewportWidth tracks the width of the current frame's view of the complex plane
+	fps                       float64  // fps imprecisely tracks FPS rendered
+	targetXHi,     targetYHi,
+	targetXLo,     targetYLo  float32  // target coordinates of the Mandelbrot set
+	cRealHi,       cRealLo,
+	cImagHi,       cImagLo    float32  // complex constant term of the Julia set
 }
 
 // gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
@@ -72,7 +71,7 @@ type gpu struct {
 	pipeline        *wgpu.ComputePipeline // GPU compute pipeline configuration
 }
 
-// assets stores assets used to render frames (canvas, font, texture).
+// assets stores assets used to render frames (canvas, font, texture view).
 type assets struct {
 	canvas             *ggcanvas.Canvas       // wraps gg.Context
 	fontSource         *text.FontSource       // font used to render per-frame stats
@@ -93,7 +92,7 @@ type renderer struct {
 type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 	paletteSize, usePowScale                      uint32
 	frameCount,  iterations                      float32 // block 1
-	width,       height,    zoomHi,    zoomLo    float32 // block 2
+	width,       height,    scaleHi,   scaleLo   float32 // block 2
 	targetXHi,   targetYHi, targetXLo, targetYLo float32 // block 3
 	cRealHi,     cImagHi,   cRealLo,   cImagLo   float32 // block 4
 }
@@ -112,17 +111,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO(jbunds): clean this up
-	shaderCode := commonShaderCode + "\n" + mandelbrotShaderCode
-	p1, p2     := coords.x, coords.y
-	if fractal == "julia" {
-		p1, p2 = coords.cReal, coords.cImag
+	var shaderCode string
+	var p1, p2     float64 // TODO(jbunds): find a good name for these overloaded variables
+	switch fractal {
+	case "julia":
+		p1, p2     = coords.cReal, coords.cImag
 		shaderCode = commonShaderCode + "\n" + juliaShaderCode
+	default:
+		p1, p2     = coords.x, coords.y
+		shaderCode = commonShaderCode + "\n" + mandelbrotShaderCode
 	}
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Mandelbrot").
-		WithTitle(fmt.Sprintf("%s - %s (%v, %vi)", fractal, coords.name, p1, p2)).
+		WithTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, coords.name, p1, p2)).
 		WithSize(mainWidth, mainHeight))
 
 	currentRenderer.Store(newRenderer(fractal, coords))
@@ -155,12 +157,11 @@ func main() {
 		cr.appendAboutMenuItem(app, &currentRenderer, aboutWin)
 
 //		if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
-//fmt.Println("inside winMenu")
 //			winMenu.AddItem(gogpu.MenuItem{Separator: true})
 //			winMenu.AddItem(gogpu.MenuItem{
 //				Title: fmt.Sprintf("mandelbrot - %s", coords.name),
-////				Role:  gogpu.RoleShowAll, // no RoleMaximize ?
-//				Role:  gogpu.RoleBringAllToFront, // no RoleMaximize ?
+//				Role:  gogpu.RoleShowAll,         // no RoleMaximize
+//				Role:  gogpu.RoleBringAllToFront, // no RoleMaximize
 //			})
 //		}
 	})
@@ -176,7 +177,6 @@ func main() {
 				if animToken.Load() != nil {
 					animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
 				}
-//fmt.Println("hiding the primary window")
 				app.PrimaryWindow().Hide()
 			}
 		case key == gpucontext.KeySpace:
@@ -232,22 +232,22 @@ func newRenderer(fractal string, coords coords) *renderer {
 		usePowScale = 1
 	}
 	return &renderer{
-		isJulia:  fractal == "julia",
+		isJulia:     fractal == "julia",
 		usePowScale: usePowScale,
-		state: &state{
-			frameCount: 0,
-			zoom:       initialZoom,
-			targetXHi:  targetXHi,
-			targetXLo:  targetXLo,
-			targetYHi:  targetYHi,
-			targetYLo:  targetYLo,
-			cRealHi:    cRealHi,
-			cRealLo:    cRealLo,
-			cImagHi:    cImagHi,
-			cImagLo:    cImagLo,
+		gpu:         new(gpu),
+		assets:      new(assets),
+		state:       &state{
+			frameCount:    0,
+			viewportWidth: viewportWidth,
+			targetXHi:     targetXHi,
+			targetXLo:     targetXLo,
+			targetYHi:     targetYHi,
+			targetYLo:     targetYLo,
+			cRealHi:       cRealHi,
+			cRealLo:       cRealLo,
+			cImagHi:       cImagHi,
+			cImagLo:       cImagLo,
 		},
-		gpu:    &gpu{},
-		assets: &assets{},
 	}
 }
 
@@ -323,30 +323,24 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	// per-frame state updates
 
-	r.state.zoom *= zoomFactor
+	r.state.viewportWidth *= scaleFactor
 	r.state.frameCount++
 
 	iterations := float64(baseIterations) + float64(r.state.frameCount) * growthRate // GPU fractal region-detection iterations
 
 	if r.isJulia {
-		// the core challenge with the Siegel Disk (c = -0.390541, -0.586788i) is that its boundary is a non-differentiable Jordan curve with a golden ratio rotation number.
-		// unlike standard filled Julia sets which have crisp, straightforward basins, the Siegel Disk features a very dense, chaotic boundary layer of points that hesitate for potentially thousands of steps before escaping (or not).
-
-//		iterations = float64(baseIterations) + (10.0 / (r.state.zoom + 0.005))
 		// decent (except for siegel):
 		iterations = float64(baseIterations) + (float64(r.state.frameCount * r.state.frameCount) * 0.003)
 	}
 
-//fmt.Printf("iterations = %v\n", iterations)
-
 	unis := updateUniforms( // magnification logic
-		r.state.frameCount, r.usePowScale,
-		mainWidth,          mainHeight,
-		r.state.targetXHi,  r.state.targetXLo,
-		r.state.targetYHi,  r.state.targetYLo,
-		r.state.cRealHi,    r.state.cRealLo,
-		r.state.cImagHi,    r.state.cImagLo,
-		r.state.zoom,       iterations,
+		r.state.frameCount,    r.usePowScale,
+		mainWidth,             mainHeight,
+		r.state.targetXHi,     r.state.targetXLo,
+		r.state.targetYHi,     r.state.targetYLo,
+		r.state.cRealHi,       r.state.cRealLo,
+		r.state.cImagHi,       r.state.cImagLo,
+		r.state.viewportWidth, iterations,
 	)
 
 	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
@@ -406,11 +400,11 @@ func (r *renderer) drawStats() {
 		cc.DrawRoundedRectangle(10, mainHeight - 40, 336, 30, 4)
 		cc.Fill()
 		cc.SetColor(gg.Cyan)
-		cc.DrawString(fmt.Sprintf("FPS: %.0f",             r.state.fps       ),  18, mainHeight - 20)
+		cc.DrawString(fmt.Sprintf("FPS: %.0f",             r.state.fps          ),  18, mainHeight - 20)
 		cc.SetColor(gg.Green)
-		cc.DrawString(fmt.Sprintf("magnification: %e", 1 / r.state.zoom      ),  72, mainHeight - 20)
+		cc.DrawString(fmt.Sprintf("magnification: %e", 1 / r.state.viewportWidth),  72, mainHeight - 20)
 		cc.SetColor(gg.Cyan)
-		cc.DrawString(fmt.Sprintf("frames: %d",            r.state.frameCount), 258, mainHeight - 20)
+		cc.DrawString(fmt.Sprintf("frames: %d",            r.state.frameCount   ), 258, mainHeight - 20)
 	})
 	if err != nil {
 		panic(err)
@@ -567,7 +561,7 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, item string) 
 	points     := pointsOfInterest()
 	pointsMenu := gogpu.NewMenuWithTitle("Points")
 
-	for _, fractal := range []string{"mandelbrot", "julia"} {
+	for _, fractal := range slices.Sorted(maps.Keys(points)) {
 		fractalMenu := gogpu.NewMenu()
 		for _, coordsName := range slices.Sorted(maps.Keys(points[fractal])) {
 			// TODO(jbunds): clean this up
@@ -585,7 +579,7 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, item string) 
 					shaderCode = commonShaderCode + "\n" + juliaShaderCode
 				}
 				newRenderer.init(app, shaderCode)
-				app.SetTitle(fmt.Sprintf("%s - %s (%v, %vi)", fractal, coordsName, p1, p2))
+				app.SetTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, coordsName, p1, p2))
 				app.PrimaryWindow().Show()
 				app.RequestRedraw()
 			}})
@@ -632,21 +626,21 @@ func (r *renderer) release() {
 
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
-	frameCount            int,
+	frameCount                int,
 	usePowScale,
-	width,     height     uint32,
-	targetXHi, targetXLo,
-	targetYHi, targetYLo,
-	cRealHi,   cRealLo,
-	cImagHi,   cImagLo    float32,
-	zoom,      iterations float64) *uniforms {
+	width,         height     uint32,
+	targetXHi,     targetXLo,
+	targetYHi,     targetYLo,
+	cRealHi,       cRealLo,
+	cImagHi,       cImagLo    float32,
+	viewportWidth, iterations float64) *uniforms {
 
-	zoomHi, zoomLo := splitFloat64(zoom)
+	scaleHi, scaleLo := splitFloat64(viewportWidth)
 
 	return &uniforms{
 		paletteSize: paletteSize,
-		zoomHi:      zoomHi,
-		zoomLo:      zoomLo,
+		scaleHi:     scaleHi,
+		scaleLo:     scaleLo,
 		usePowScale: usePowScale,
 
 		width:       float32(width),
