@@ -112,7 +112,7 @@ func main() {
 	}
 
 	var shaderCode string
-	var p1, p2     float64 // TODO(jbunds): find a good name for these overloaded variables
+	var p1, p2     float64 // TODO(jbunds): use better names for these overloaded variables
 	switch fractal {
 	case "julia":
 		p1, p2     = coords.cReal, coords.cImag
@@ -125,7 +125,8 @@ func main() {
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Mandelbrot").
 		WithTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, coords.name, p1, p2)).
-		WithSize(mainWidth, mainHeight))
+		WithSize(mainWidth, mainHeight).
+		WithResizable(false))
 
 	currentRenderer.Store(newRenderer(fractal, coords))
 
@@ -151,7 +152,7 @@ func main() {
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetCustomMenu() in addPointsMenu() ?
-		cr.addPointsMenu(app, &currentRenderer, coords.name)
+		cr.addPointsMenu(app, &currentRenderer)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
 		cr.appendAboutMenuItem(app, &currentRenderer, aboutWin)
@@ -415,6 +416,8 @@ func (r *renderer) drawStats() {
 // menu which renders a small window with some text when selected.
 func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
 	app.SetMenu(gogpu.NewMenu().
+		// TODO(jbunds): fix bug whereby selecting the custom "About Mandelbrot" item from the
+		//               application menu incorrectly renders a new frame to the primary window
 		AddItem(gogpu.MenuItem{Title: "About Mandelbrot", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Settings…",        Role: gogpu.RolePreferences}).
@@ -475,7 +478,6 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWi
 		if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
 			panic(err)
 		}
-		app.RequestRedraw()
 	})
 
 //		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
@@ -557,7 +559,7 @@ func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, f
 }
 
 // addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
-func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, item string) {
+func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value) {
 	points     := pointsOfInterest()
 	pointsMenu := gogpu.NewMenuWithTitle("Points")
 
@@ -569,7 +571,7 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, item string) 
 			if fractal == "julia" {
 				p1, p2 = points[fractal][coordsName].cReal, points[fractal][coordsName].cImag
 			}
-			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", coordsName, p1, p2), Disabled: coordsName == item, Action: func() {
+			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", coordsName, p1, p2), Action: func() {
 				newRenderer := newRenderer(fractal, points[fractal][coordsName])
 				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
 				oldRenderer.release()
