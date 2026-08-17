@@ -1,4 +1,4 @@
-// Package mandelbrot/gogpu renders the Mandelbrot set and zooms in on preset coordinates.
+// Package mandelbrot/gogpu iteratively renders and magnifies the Mandelbrot or filled Julia set.
 //
 // Tested on a MacBook Air M1.
 package main
@@ -22,10 +22,18 @@ import (
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
+//go:embed common.wgsl
+var commonShaderCode string
+
 //go:embed mandelbrot.wgsl
-var shaderCode string
+var mandelbrotShaderCode string
+
+//go:embed julia.wgsl
+var juliaShaderCode string
 
 const (
 	mainWidth          = 800   // primary window logical width
@@ -34,20 +42,23 @@ const (
 	aboutHeight        = 164   // about window logical height
 	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
 	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
-	initialZoom        = 3.0   // initial magnification factor of the rendered image
-	zoomFactor         = 0.993 // multiplicative factor by which the rendering is iteratively magnified
-	growthRate         = 0.2   // multiplicative factor by which boundary calculation iterations increases per each successive magnification
+	// TODO(jbunds): change the name of "initialZoom", since it actually represents the viewport width of the initial frame
+	initialZoom        = 3.0   // viewport width of the initial frame <!--initial magnification factor of the rendered image-->
+	zoomFactor         = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
+	growthRate         = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame
 	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
 // state stores the application state (uniforms, color palette, and FPS stats).
 type state struct {
-	frameCount            int     // tracks the number of frames rendered
-	zoom, fps             float64 // zoom tracks the magnification factor of the current frame; fps imprecisely tracks FPS rendered
+	frameCount            int      // tracks the number of frames rendered
+	paletteColors         []uint32 // pre-computed color palette
+	// TODO(jbunds): change the name of the "zoom" field since it actually represents the viewport width of the current frame
+	zoom,      fps        float64  // zoom tracks the magnification factor of the current frame; fps imprecisely tracks FPS rendered
 	targetXHi, targetYHi,
-	targetXLo, targetYLo  float32 // double-precision target coordinates in the complex plane
-	paletteColors        []uint32 // pre-computed color palette
-
+	targetXLo, targetYLo  float32  // target coordinates of the Mandelbrot set
+	cRealHi,   cRealLo,
+	cImagHi,   cImagLo    float32  // complex constant term of the Julia set
 }
 
 // gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
@@ -71,17 +82,20 @@ type assets struct {
 
 // renderer stores most runtime state.
 type renderer struct {
-	state  *state
-	gpu    *gpu
-	assets *assets
+	isJulia     bool
+	usePowScale uint32
+	state       *state
+	gpu         *gpu
+	assets      *assets
 }
 
 // uniforms stores per-frame uniforms.
-type uniforms struct { // total: (1 uint32 field + 11 float32 fields) * 4 bytes == 48 bytes
-	paletteSize                                   uint32
-	frameCount, iterations, pad                  float32 // block 1
-	width,      height,     zoomHi,    zoomLo    float32 // block 2
-	targetXHi,  targetYHi,  targetXLo, targetYLo float32 // block 3
+type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
+	paletteSize, usePowScale                      uint32
+	frameCount,  iterations                      float32 // block 1
+	width,       height,    zoomHi,    zoomLo    float32 // block 2
+	targetXHi,   targetYHi, targetXLo, targetYLo float32 // block 3
+	cRealHi,     cImagHi,   cRealLo,   cImagLo   float32 // block 4
 }
 
 func main() {
@@ -92,46 +106,81 @@ func main() {
 		currentRenderer atomic.Value
 	)
 
-	coords, err := flags(flag.CommandLine, os.Args[1:])
+	fractal, coords, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
 		os.Exit(1)
 	}
 
+	// TODO(jbunds): clean this up
+	shaderCode := commonShaderCode + "\n" + mandelbrotShaderCode
+	p1, p2     := coords.x, coords.y
+	if fractal == "julia" {
+		p1, p2 = coords.cReal, coords.cImag
+		shaderCode = commonShaderCode + "\n" + juliaShaderCode
+	}
+
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Mandelbrot").
-		WithTitle(fmt.Sprintf("mandelbrot - %s", coords.name)).
+		WithTitle(fmt.Sprintf("%s - %s (%v, %vi)", fractal, coords.name, p1, p2)).
 		WithSize(mainWidth, mainHeight))
 
-	currentRenderer.Store(newRenderer(coords))
+	currentRenderer.Store(newRenderer(fractal, coords))
 
 	// GoGPU callback registrations and definitions
 
 	app.OnSurfaceAvailable(func() {
+		aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
+			WithTitle(""). // looks more slick and modern when combined with the transparent title bar triggered via WithHeaderAlignment(gogpu.HeaderAlignLeft) below
+			WithSize(aboutWidth, aboutHeight).
+			WithTransparent(true).
+			WithResizable(false).
+			WithHeaderAlignment(gogpu.HeaderAlignLeft)) // renders transparent title bar
+		if err != nil {
+			panic(err)
+		}
+		aboutWin.Hide()
+
 		cr := currentRenderer.Load().(*renderer)
-		cr.init(app)
+		cr.init(app, shaderCode)
+
+		// when appendAboutMenuItem is called before addPointsMenu, duplicate items are added to the main application menu
+
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetCustomMenu() in addPointsMenu() ?
-		cr.addPointsMenu(app, &currentRenderer, &animToken, coords.name)
+		cr.addPointsMenu(app, &currentRenderer, coords.name)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
-		cr.appendAboutMenuItem(app, &currentRenderer)
+		cr.appendAboutMenuItem(app, &currentRenderer, aboutWin)
+
+//		if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
+//fmt.Println("inside winMenu")
+//			winMenu.AddItem(gogpu.MenuItem{Separator: true})
+//			winMenu.AddItem(gogpu.MenuItem{
+//				Title: fmt.Sprintf("mandelbrot - %s", coords.name),
+////				Role:  gogpu.RoleShowAll, // no RoleMaximize ?
+//				Role:  gogpu.RoleBringAllToFront, // no RoleMaximize ?
+//			})
+//		}
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-		if key == gpucontext.KeySpace {
-			toggleAnimation(app, &animToken)
-		}
-		if key == gpucontext.KeyQ && mods.HasSuper() { // ⌘+q
-			currentRenderer.Load().(*renderer).release()
-			app.Quit()
-		}
-		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
-			if animToken.Load() != nil {
-				animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
+		switch {
+		case mods.HasSuper():
+			switch key {
+			case gpucontext.KeyQ: // ⌘+q
+				currentRenderer.Load().(*renderer).release()
+				app.Quit()
+			case gpucontext.KeyW: // ⌘+w
+				if animToken.Load() != nil {
+					animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
+				}
+//fmt.Println("hiding the primary window")
+				app.PrimaryWindow().Hide()
 			}
-			app.PrimaryWindow().Hide()
+		case key == gpucontext.KeySpace:
+			toggleAnimation(app, &animToken)
 		}
 	})
 
@@ -169,10 +218,22 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(coords coords) *renderer {
+func newRenderer(fractal string, coords coords) *renderer {
 	targetXHi, targetXLo := splitFloat64(coords.x)
 	targetYHi, targetYLo := splitFloat64(coords.y)
+	cRealHi,   cRealLo   := splitFloat64(coords.cReal)
+	cImagHi,   cImagLo   := splitFloat64(coords.cImag)
+	var usePowScale uint32
+	if coords.name == "airplane"    ||
+	   coords.name == "basilica"    ||
+	   coords.name == "cantor dust" ||
+	   coords.name == "rabbit"      ||
+	   coords.name == "siegel"      {
+		usePowScale = 1
+	}
 	return &renderer{
+		isJulia:  fractal == "julia",
+		usePowScale: usePowScale,
 		state: &state{
 			frameCount: 0,
 			zoom:       initialZoom,
@@ -180,6 +241,10 @@ func newRenderer(coords coords) *renderer {
 			targetXLo:  targetXLo,
 			targetYHi:  targetYHi,
 			targetYLo:  targetYLo,
+			cRealHi:    cRealHi,
+			cRealLo:    cRealLo,
+			cImagHi:    cImagHi,
+			cImagLo:    cImagLo,
 		},
 		gpu:    &gpu{},
 		assets: &assets{},
@@ -187,7 +252,7 @@ func newRenderer(coords coords) *renderer {
 }
 
 // init initializes all resources required to render frames in the main application window.
-func (r *renderer) init(app *gogpu.App) {
+func (r *renderer) init(app *gogpu.App, shaderCode string) {
 	var err error
 	r.assets.fontSource, err = loadFontSource()
 	if err != nil {
@@ -200,7 +265,8 @@ func (r *renderer) init(app *gogpu.App) {
 		uniformBuf,
 		bgLayout0,
 		bgLayout1,
-		pipeline := initResources(r.gpu.device, baseIterations)
+		pipeline := initResources(r.gpu.device, shaderCode)
+
 
 	r.state.paletteColors = paletteColors
 	r.gpu.paletteBuf      = paletteBuf
@@ -224,7 +290,7 @@ func (r *renderer) init(app *gogpu.App) {
 	r.gpu.staticBindGroup, err = r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Layout:  r.gpu.bgLayout0,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Size: 48,                      Buffer: r.gpu.uniformBuf},
+			{Binding: 0, Size: 64,                      Buffer: r.gpu.uniformBuf},
 			{Binding: 1, Size: uint64(paletteSize * 4), Buffer: r.gpu.paletteBuf},
 		},
 	})
@@ -260,16 +326,30 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	r.state.zoom *= zoomFactor
 	r.state.frameCount++
 
+	iterations := float64(baseIterations) + float64(r.state.frameCount) * growthRate // GPU fractal region-detection iterations
+
+	if r.isJulia {
+		// the core challenge with the Siegel Disk (c = -0.390541, -0.586788i) is that its boundary is a non-differentiable Jordan curve with a golden ratio rotation number.
+		// unlike standard filled Julia sets which have crisp, straightforward basins, the Siegel Disk features a very dense, chaotic boundary layer of points that hesitate for potentially thousands of steps before escaping (or not).
+
+//		iterations = float64(baseIterations) + (10.0 / (r.state.zoom + 0.005))
+		// decent (except for siegel):
+		iterations = float64(baseIterations) + (float64(r.state.frameCount * r.state.frameCount) * 0.003)
+	}
+
+//fmt.Printf("iterations = %v\n", iterations)
+
 	unis := updateUniforms( // magnification logic
-		r.state.frameCount,
-		mainWidth, mainHeight,
-		r.state.targetXHi, r.state.targetXLo,
-		r.state.targetYHi, r.state.targetYLo,
-		r.state.zoom,
-		float64(baseIterations) + float64(r.state.frameCount) * growthRate, // GPU fractal region-detection iterations
+		r.state.frameCount, r.usePowScale,
+		mainWidth,          mainHeight,
+		r.state.targetXHi,  r.state.targetXLo,
+		r.state.targetYHi,  r.state.targetYLo,
+		r.state.cRealHi,    r.state.cRealLo,
+		r.state.cImagHi,    r.state.cImagLo,
+		r.state.zoom,       iterations,
 	)
 
-	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&unis)), 48))
+	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
 	if err != nil {
 		panic(err)
 	}
@@ -305,7 +385,10 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		panic(err)
 	}
 
-	r.gpu.device.Queue().Submit(cmds)
+	_, err = r.gpu.device.Queue().Submit(cmds)
+	if err != nil {
+		panic(err)
+	}
 
 	r.drawStats()
 
@@ -334,52 +417,29 @@ func (r *renderer) drawStats() {
 	}
 }
 
-// addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
-func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, token *atomic.Pointer[gogpu.AnimationToken], item string) {
-	points     := pointsOfInterest()
-	pointsMenu := gogpu.NewMenuWithTitle("Points")
-
-	for _, v := range slices.Sorted(maps.Keys(points)) {
-		pointsMenu.AddItem(gogpu.MenuItem{Title: v, Disabled: v == item, Action: func() {
-			newRenderer := newRenderer(points[v])
-			oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
-			oldRenderer.release()
-			newRenderer.init(app)
-			app.SetTitle(fmt.Sprintf("mandelbrot - %s", v))
-			app.PrimaryWindow().Show()
-			if token.Load() == nil {
-				token.Swap(app.StartAnimation()) // resume animation if paused, e.g., when the primary window was hidden by the user pressing ⌘+w
-			}
-			app.RequestRedraw()
-		}})
-	}
-
-	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
-	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("points", pointsMenu)
-}
-
 // appendAboutMenuItem appends an "About Mandelbrot" menu item to the application
 // menu which renders a small window with some text when selected.
-func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
-	aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
-		WithTitle("About Mandelbrot").
-		WithSize(aboutWidth, aboutHeight).
-		WithTransparent(true).
-		WithResizable(false))
-	if err != nil {
-		panic(err)
-	}
+func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
+	app.SetMenu(gogpu.NewMenu().
+		AddItem(gogpu.MenuItem{Title: "About Mandelbrot", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Settings…",        Role: gogpu.RolePreferences}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Services",         Role: gogpu.RoleServices}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Hide Mandelbrot",  Role: gogpu.RoleHide}).
+		AddItem(gogpu.MenuItem{Title: "Hide Others",      Role: gogpu.RoleHideOthers}).
+		AddItem(gogpu.MenuItem{Title: "Show All",         Role: gogpu.RoleShowAll}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Quit Mandelbrot",  Role: gogpu.RoleQuit}))
 
-	aboutWin.Hide()
-
-	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
-	appMenu.AddItem(gogpu.MenuItem{Separator: true})
-	appMenu.AddItem(gogpu.MenuItem{
-		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot"
-		//Role:   gogpu.RoleAbout, // causes my custom window to be effectively discarded
-		Action: func() { aboutWin.Show() },
-	})
+//	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
+//	appMenu.AddItem(gogpu.MenuItem{Separator: true})
+//	appMenu.AddItem(gogpu.MenuItem{
+//		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot"
+//		Role:   gogpu.RoleAbout, // doesn't prepend the "circled i" system icon to the title like RolePreferences (gear icon) or RoleQuit ("boxed x" icon) roles do
+//		Action: func() { aboutWin.Show() },
+//	})
 
 	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
 	if err != nil {
@@ -387,9 +447,9 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	}
 
 	var (
-		view     *gpucontext.TextureView
-		release  func()
-		rendered bool
+		renderOnce sync.Once
+		view       *gpucontext.TextureView
+		release    func()
 	)
 
 	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
@@ -399,18 +459,17 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
 		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Points" menu before selecting the About menu item
 		err := canvas.Draw(func(cc *gg.Context) {
-			if !rendered {
+			renderOnce.Do(func() {
 				view, release = ar.renderAboutWindow(cc)
-			}
-			cc.MarkFrameRendered()
-			rendered = true
+			})
+			cc.MarkFrameRendered() // ?
 
 			// composite the About window TextureView atop the background
 
-			cc.Push() // save pre-translation state
+			cc.Push()                        // save pre-translation state
 			cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
 			cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
-			cc.Pop() // restore pre-translation state so the overlay and text remain unaffected by the translation
+			cc.Pop()                         // restore pre-translation state so the overlay and text remain unaffected by the translation
 			cc.SetRGBA(0, 0, 0, 0.6)
 			cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
 			cc.Fill()
@@ -425,6 +484,27 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 		app.RequestRedraw()
 	})
 
+//		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+//fmt.Println("HERE")
+//			if mods.HasSuper() {
+//				switch key {
+//				case gpucontext.KeyW: // ⌘+w
+//					aboutWin.Close()
+//				case gpucontext.KeyQ: // ⌘+q
+//					cr.Load().(*renderer).release()
+//					app.Quit()
+//				}
+//			}
+//		})
+//
+	aboutWin.SetOnClose(func() bool {
+		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
+		if release != nil {
+			release()
+		}
+		return true
+	})
+
 	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
 	//
 	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
@@ -433,20 +513,24 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value) {
 	// TODO(jbunds): intercept ⌘+w and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+w is pressed
 	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
 	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
-		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
-			aboutWin.Close() // aboutWin.Hide() ?
-		}
-	})
 
-	aboutWin.SetOnClose(func() bool {
-		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
-		if release != nil {
-			release()
-		}
-		return true
-	})
+//	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+//		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
+//		// why is https://pkg.go.dev/github.com/gogpu/gogpu#App.HasFocus a method on App instead of Window ?
+//		// https://pkg.go.dev/github.com/gogpu/gpucontext#FocusEvent
+//		//aboutWin.HasFocus()
+//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
+//			aboutWin.Close()
+//		}
+//	})
+//
+//	aboutWin.SetOnClose(func() bool {
+//		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
+//		if release != nil {
+//			release()
+//		}
+//		return true
+//	})
 }
 
 // renderAboutWindow renders the About window content to an off-screen texture.
@@ -467,15 +551,53 @@ func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, f
 	// foreground
 	cc.SetColor(gg.White)
 	cc.SetFont(r.assets.fontSource.Face(10))
-	cc.DrawString("Mandelbrot 1.0",   15, 24)
-	cc.DrawString("Jeff Bunds",       15, 44)
-	cc.DrawString("Copyright © 2026", 15, 64)
+	cc.DrawString("Mandelbrot 1.0",   15, 30)
+	cc.DrawString("Jeff Bunds",       15, 50)
+	cc.DrawString("Copyright © 2026", 15, 70)
 	cc.Fill()
 
 	if err := cc.FlushGPUWithViewPreserveContent(view, aboutWidth, aboutHeight); err != nil {
 		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
 	}
 	return &view, release
+}
+
+// addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
+func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value, item string) {
+	points     := pointsOfInterest()
+	pointsMenu := gogpu.NewMenuWithTitle("Points")
+
+	for _, fractal := range []string{"mandelbrot", "julia"} {
+		fractalMenu := gogpu.NewMenu()
+		for _, coordsName := range slices.Sorted(maps.Keys(points[fractal])) {
+			// TODO(jbunds): clean this up
+			p1, p2 := points[fractal][coordsName].x, points[fractal][coordsName].y
+			if fractal == "julia" {
+				p1, p2 = points[fractal][coordsName].cReal, points[fractal][coordsName].cImag
+			}
+			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", coordsName, p1, p2), Disabled: coordsName == item, Action: func() {
+				newRenderer := newRenderer(fractal, points[fractal][coordsName])
+				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
+				oldRenderer.release()
+				// TODO(jbunds): clean this up
+				shaderCode := commonShaderCode + "\n" + mandelbrotShaderCode
+				if fractal == "julia" {
+					shaderCode = commonShaderCode + "\n" + juliaShaderCode
+				}
+				newRenderer.init(app, shaderCode)
+				app.SetTitle(fmt.Sprintf("%s - %s (%v, %vi)", fractal, coordsName, p1, p2))
+				app.PrimaryWindow().Show()
+				app.RequestRedraw()
+			}})
+		}
+		pointsMenu.AddItem(gogpu.MenuItem{
+			Title:   cases.Title(language.English).String(fractal),
+			Submenu: fractalMenu})
+	}
+
+	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
+	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
+	app.SetCustomMenu("points", pointsMenu)
 }
 
 // fractalViewBindGroup creates the BindGroup holding the per-frame TextureView of the rendered fractal.
@@ -510,36 +632,49 @@ func (r *renderer) release() {
 
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
-	frameCount                                 int,
-	width,     height                          uint32,
-	targetXHi, targetXLo, targetYHi, targetYLo float32,
-	zoom,      iterations                      float64) uniforms {
+	frameCount            int,
+	usePowScale,
+	width,     height     uint32,
+	targetXHi, targetXLo,
+	targetYHi, targetYLo,
+	cRealHi,   cRealLo,
+	cImagHi,   cImagLo    float32,
+	zoom,      iterations float64) *uniforms {
 
 	zoomHi, zoomLo := splitFloat64(zoom)
 
-	return uniforms{
+	return &uniforms{
 		paletteSize: paletteSize,
+		zoomHi:      zoomHi,
+		zoomLo:      zoomLo,
+		usePowScale: usePowScale,
+
 		width:       float32(width),
 		height:      float32(height),
 		iterations:  float32(iterations),
+		frameCount:  float32(frameCount),
 
-		zoomHi:      zoomHi,
-		zoomLo:      zoomLo,
 		targetXHi:   targetXHi,
 		targetYHi:   targetYHi,
-
 		targetXLo:   targetXLo,
 		targetYLo:   targetYLo,
-		frameCount:  float32(frameCount),
+
+		cRealHi:     cRealHi,
+		cRealLo:     cRealLo,
+		cImagHi:     cImagHi,
+		cImagLo:     cImagLo,
 	}
 }
 
 // toggleAnimation toggles between pausing and resuming the animation loop,
 // e.g., when the spacebar is pressed, or when the primary window is hidden.
 func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]) {
+	// TODO(jbunds): fix the bug where animation is not actually toggled when the "About Mandelbrot" window has focus
 	if oldToken := token.Swap(nil); oldToken != nil {
+//fmt.Println("suspending animation")
 		oldToken.Stop()
 	} else {
+//fmt.Println("resuming animation")
 		token.Store(app.StartAnimation())
 	}
 }

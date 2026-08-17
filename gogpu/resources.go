@@ -10,7 +10,7 @@ import (
 // initResources initializes all resources consumed by the GPU shader.
 func initResources(
 	device     *wgpu.Device,
-	iterations float64,
+	shaderCode string,
 ) (
 	[]uint32,
 	*wgpu.Buffer,
@@ -24,7 +24,7 @@ func initResources(
 		panic(err)
 	}
 
-	paletteColors, paletteBuf := initPaletteBuf(device, iterations)
+	paletteColors, paletteBuf := initPaletteBuf(device)
 	uniformBuf                := initUniformBuf(device)
 	bgLayout0, bgLayout1      := initBindGroupLayouts(device)
 	layout                    := initPipelineLayout(device, bgLayout0, bgLayout1)
@@ -34,22 +34,46 @@ func initResources(
 }
 
 // initPalette initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
-func initPalette(iterations float64) []uint32 {
-	colors := make([]uint32, paletteSize)
-	for i := range paletteSize {
-		iterations := float64(i) * (iterations / float64(paletteSize))
-		a := uint32(255)
-		r := uint32(math.Sin(0.015 * iterations + 1.0) * 127 + 128)
-		g := uint32(math.Sin(0.012 * iterations + 2.0) * 127 + 128)
-		b := uint32(math.Sin(0.010 * iterations + 4.0) * 127 + 128)
-		colors[i] = r | (g << 8) | (b << 16) | (a << 24)
+func initPalette() []uint32 {
+	colors        := make([]uint32, paletteSize)
+	c1r, c1g, c1b :=  25.0,  30.0,  28.0
+	c2r, c2g, c2b := 105.0, 125.0, 100.0
+	c3r, c3g, c3b := 215.0, 135.0,  30.0
+	c4r, c4g, c4b := 245.0, 200.0,  35.0
+	c5r, c5g, c5b := 245.0, 240.0, 225.0
+	for i := range colors {
+		t    := float64(i) / float64(paletteSize)
+		tAdj := 0.5 - 0.5 * math.Cos(t * 2.0 * math.Pi)
+		var r, g, b float64
+		if tAdj < 0.25 {
+			p := tAdj / 0.25
+			r  = c1r + (c2r - c1r) * p
+			g  = c1g + (c2g - c1g) * p
+			b  = c1b + (c2b - c1b) * p
+		} else if tAdj < 0.50 {
+			p := (tAdj - 0.25) / 0.25
+			r  = c2r + (c3r - c2r) * p
+			g  = c2g + (c3g - c2g) * p
+			b  = c2b + (c3b - c2b) * p
+		} else if tAdj < 0.75 {
+			p := (tAdj - 0.50) / 0.25
+			r  = c3r + (c4r - c3r) * p
+			g  = c3g + (c4g - c3g) * p
+			b  = c3b + (c4b - c3b) * p
+		} else {
+			p := (tAdj - 0.75) / 0.25
+			r  = c4r + (c5r - c4r) * p
+			g  = c4g + (c5g - c4g) * p
+			b  = c4b + (c5b - c4b) * p
+		}
+		colors[i] = uint32(r) | (uint32(g) << 8) | (uint32(b) << 16) | (255 << 24)
 	}
 	return colors
 }
 
 // initPaletteBuf initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
-func initPaletteBuf(device *wgpu.Device, iterations float64) ([]uint32, *wgpu.Buffer) {
-	paletteColors   := initPalette(iterations)
+func initPaletteBuf(device *wgpu.Device) ([]uint32, *wgpu.Buffer) {
+	paletteColors   := initPalette()
 	paletteBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Size:  uint64(len(paletteColors) * 4),
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
@@ -63,7 +87,7 @@ func initPaletteBuf(device *wgpu.Device, iterations float64) ([]uint32, *wgpu.Bu
 // initUniformBuf initializes the uniform buffer used to pass uniforms to the GPU shader.
 func initUniformBuf(device *wgpu.Device) *wgpu.Buffer {
 	uniformBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Size:  48,
+		Size:  64,
 		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
