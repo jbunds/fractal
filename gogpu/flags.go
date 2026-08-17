@@ -32,12 +32,12 @@ func paramsOfInterest() map[string]map[string]params {
 			"starburst": {name: "starburst",        xReal: -0.77568377,        yImag: 0.13646737       },
 		},
 		"julia": {
-			"spiral":   {name: "spiral",      cReal: -0.8,           cImag:  0.156        }, // default
-			"basilica": {name: "basilica",    cReal: -0.75,          cImag:  0.0          },
-			"cantor":   {name: "cantor dust", cReal:  0.4,           cImag:  0.1          },
-			"dendrite": {name: "dendrite",    cReal: -0.4,           cImag:  0.6          },
-			"rabbit":   {name: "rabbit",      cReal: -0.12256116687, cImag:  0.74486176688},
-			"siegel":   {name: "siegel",      cReal: -0.390541,      cImag: -0.586788     },
+			"spiral":   {name: "spiral",      cReal: -0.8,      cImag:  0.156   }, // default
+			"basilica": {name: "basilica",    cReal: -0.75,     cImag:  0.0     },
+			"cantor":   {name: "cantor dust", cReal:  0.4,      cImag:  0.1     },
+			"dendrite": {name: "dendrite",    cReal: -0.4,      cImag:  0.6     },
+			"rabbit":   {name: "rabbit",      cReal: -0.122561, cImag:  0.744862},
+			"siegel":   {name: "siegel",      cReal: -0.390541, cImag: -0.586788},
 		},
 	}
 	for k, p := range params["julia"] {
