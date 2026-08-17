@@ -33,9 +33,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let screenY = f32(id.y);
   let minDim  = min(unis.width, unis.height);
 
-  let scale   = vec2<f32>(unis.scaleHi,   unis.scaleLo);
-  let targetX = vec2<f32>(unis.targetXHi, unis.targetXLo);
-  let targetY = vec2<f32>(unis.targetYHi, unis.targetYLo);
+  let scale   = vec2<f32>(unis.scaleHi, unis.scaleLo);
+  let targetX = vec2<f32>(unis.xRealHi, unis.xRealLo);
+  let targetY = vec2<f32>(unis.yImagHi, unis.yImagLo);
 
   let scaleX  = to_dd((screenX - (unis.width  / 2.0)) / minDim);
   let scaleY  = to_dd((screenY - (unis.height / 2.0)) / minDim); // y-axis not inverted; viewport center == cartesian center
@@ -51,7 +51,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   } else {
     let t_linear = iter / unis.iterations;
     let t_power  = pow(t_linear, 0.6);
-    let normal_t = select(t_linear, t_power, unis.usePowScale == 1u);
+    let normal_t = select(t_linear, t_power, unis.powScale == 1u);
     let idx      = u32(normal_t * f32(unis.paletteSize)) % unis.paletteSize;
     color        = unpack4x8unorm(palette[idx]);
   }

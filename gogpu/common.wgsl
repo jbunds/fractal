@@ -9,7 +9,7 @@
 
 struct uniforms { // field declaration order must cohere with the corresponding Go struct field declaration order
   paletteSize:  u32,
-  usePowScale:  u32, // pseudo-boolean (1.0 == true; 0.0 == false) indicating whether or not a power-scaled 
+  powScale:     u32,
   frameCounter: f32,
   iterations:   f32,
 
@@ -18,10 +18,10 @@ struct uniforms { // field declaration order must cohere with the corresponding 
   scaleHi:      f32,
   scaleLo:      f32,
 
-  targetXHi:    f32,
-  targetYHi:    f32,
-  targetXLo:    f32,
-  targetYLo:    f32,
+  xRealHi:      f32,
+  yImagHi:      f32,
+  xRealLo:      f32,
+  yImagLo:      f32,
 
   cRealHi:      f32,
   cImagHi:      f32,

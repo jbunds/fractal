@@ -9,51 +9,53 @@ import (
 	"strings"
 )
 
-// coords represents the named x, y coordinates of a target point of interest.
-type coords struct {
+// params represents a named preset set of parameters:
+//   - the real and imaginary (x, y) coordinates of a target point of interest in the Mandelbrot set; or
+//   - the real and imaginary components of the complex term (𝑐) which defines the filled Julia set
+type params struct {
 	name         string
 	cReal, cImag float64
-	x,     y     float64
+	xReal, yImag float64
 }
 
-// pointsOfInterest returns a slice of named x, y coordinates of canonical points of interest in the Mandelbrot and filled Julia sets.
-func pointsOfInterest() map[string]map[string]coords {
-	points := map[string]map[string]coords{
+// paramsOfInterest returns a map of named preset parameters used to
+// render a fractal and zoom in on interesting locations therein.
+func paramsOfInterest() map[string]map[string]params {
+	params := map[string]map[string]params{
 		"mandelbrot": {
-			"spiral":    {name: "spiral",           x: -0.088,             y: 0.6555           }, // default
-			"elephant":  {name: "elephant valley",  x:  0.2777,            y: 0.0073           },
-			"lightning": {name: "lightning branch", x: -1.250662834,       y: 0.020126938      },
-			"seahorse":  {name: "seahorse valley",  x: -0.743643887037151, y: 0.131825904205330},
-			"scepter":   {name: "scepter",          x: -1.45,              y: 0.0              },
-			"spider":    {name: "spider",           x: -1.4063,            y: 0.0              },
-			"starburst": {name: "starburst",        x: -0.77568377,        y: 0.13646737       },
+			"spiral":    {name: "spiral",           xReal: -0.088,             yImag: 0.6555           }, // default
+			"elephant":  {name: "elephant valley",  xReal:  0.2777,            yImag: 0.0073           },
+			"lightning": {name: "lightning branch", xReal: -1.250662834,       yImag: 0.020126938      },
+			"seahorse":  {name: "seahorse valley",  xReal: -0.743643887037151, yImag: 0.131825904205330},
+			"scepter":   {name: "scepter",          xReal: -1.45,              yImag: 0.0              },
+			"spider":    {name: "spider",           xReal: -1.4063,            yImag: 0.0              },
+			"starburst": {name: "starburst",        xReal: -0.77568377,        yImag: 0.13646737       },
 		},
 		"julia": {
-			"spiral":   {name: "spiral",      cReal: -0.8,      cImag:  0.156   }, // default
-			"airplane": {name: "airplane",    cReal: -0.12,     cImag:  0.74    },
-			"basilica": {name: "basilica",    cReal: -0.75,     cImag:  0.0     },
-			"cantor":   {name: "cantor dust", cReal:  0.4,      cImag:  0.1     },
-			"dendrite": {name: "dendrite",    cReal: -0.4,      cImag:  0.6     },
-			"rabbit":   {name: "rabbit",      cReal: -0.123,    cImag:  0.745   },
-			"siegel":   {name: "siegel",      cReal: -0.390541, cImag: -0.586788},
+			"spiral":   {name: "spiral",      cReal: -0.8,           cImag:  0.156        }, // default
+			"basilica": {name: "basilica",    cReal: -0.75,          cImag:  0.0          },
+			"cantor":   {name: "cantor dust", cReal:  0.4,           cImag:  0.1          },
+			"dendrite": {name: "dendrite",    cReal: -0.4,           cImag:  0.6          },
+			"rabbit":   {name: "rabbit",      cReal: -0.12256116687, cImag:  0.74486176688},
+			"siegel":   {name: "siegel",      cReal: -0.390541,      cImag: -0.586788     },
 		},
 	}
-	for k, p := range points["julia"] {
+	for k, p := range params["julia"] {
 		if k == "siegel" || k == "spiral" {
-			p.x, p.y = 0, 0
-			points["julia"][k] = p
+			p.xReal, p.yImag   = 0, 0
+			params["julia"][k] = p
 			continue
 		}
 		c := complex(p.cReal, p.cImag)
 		z := (1.0 - cmplx.Sqrt(1.0 - 4.0 * c)) / 2.0
-		p.x, p.y = real(z), imag(z)
-		points["julia"][k] = p
+		p.xReal, p.yImag   = real(z), imag(z)
+		params["julia"][k] = p
 	}
-	return points
+	return params
 }
 
-// flags parses command line flags and returns the fractal name, and the named x, y coordinates of the user-specified point of interest.
-func flags(fs *flag.FlagSet, args []string) (string, coords, error) {
+// flags parses command line flags and returns the fractal parameters for the user-specified preset.
+func flags(fs *flag.FlagSet, args []string) (string, params, error) {
 	args = filterArgs(args)
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(fs.Output(), "%s usage:\n\n", filepath.Base(fs.Name()))
@@ -62,36 +64,36 @@ func flags(fs *flag.FlagSet, args []string) (string, coords, error) {
 	}
 	var targetName, fractalName string
 	fs.StringVar(&fractalName, "fractal", "mandelbrot", `fractal ("mandelbrot" or "julia")`)
-	fs.StringVar(&targetName,  "target",  "spiral",     `canonical name for target x, y coordinates ("seahorse", "spiral", etc)`)
+	fs.StringVar(&targetName,  "target",  "spiral",     `canonical name for target coordinates or complex term ("seahorse", "dendrite", etc)`)
 	if err := fs.Parse(args); err != nil {
 		fs.Usage()
-		return "", coords{}, err
+		return "", params{}, err
 	}
-	points            := pointsOfInterest()
-	fractalPoints, ok := points[fractalName]
+	parameters        := paramsOfInterest()
+	fractalParams, ok := parameters[fractalName]
 	if !ok {
 		fs.Usage()
 		fmt.Fprintf(os.Stderr, "valid values for -fractal:\n\n")
-		for fractalName := range points {
+		for fractalName := range parameters {
 			fmt.Fprintf(os.Stderr, "  %s\n", fractalName)
 		}
 		fmt.Fprintln(os.Stderr)
-		return "", coords{}, fmt.Errorf("invalid fractal specified: %q", fractalName)
+		return "", params{}, fmt.Errorf("invalid fractal specified: %q", fractalName)
 	}
 	flagSpecified := make(map[string]bool, 2)
 	flag.Visit(func(f *flag.Flag) { flagSpecified[f.Name] = true })
 	if fractalName == "julia" && !flagSpecified["target"] {
 		targetName = "spiral" // set default for the `-fractal julia` case
 	}
-	target, ok := fractalPoints[targetName]
+	target, ok := fractalParams[targetName]
 	if !ok {
 		fs.Usage()
 		fmt.Fprintf(os.Stderr, "valid values for -target:\n\n")
-		for targetName := range fractalPoints {
+		for targetName := range fractalParams {
 			fmt.Fprintf(os.Stderr, "  %s\n", targetName)
 		}
 		fmt.Fprintln(os.Stderr)
-		return "", coords{}, fmt.Errorf("invalid target specified: %q", targetName)
+		return "", params{}, fmt.Errorf("invalid target specified: %q", targetName)
 	}
 	if fs.NArg() > 0 {
 		_, _ = fmt.Fprintf(fs.Output(), "ignored arguments: %s\n", strings.Join(fs.Args(), ", "))

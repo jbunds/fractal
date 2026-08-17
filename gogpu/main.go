@@ -50,14 +50,14 @@ const (
 
 // state stores the application state (uniforms, color palette, and FPS stats).
 type state struct {
-	frameCount            int      // tracks the number of frames rendered
-	paletteColors         []uint32 // pre-computed color palette
-	viewportWidth,                 // tracks the width of the current frame's view of the complex plane
-	fps                   float64  // fps imprecisely tracks FPS rendered
-	targetXHi, targetYHi,
-	targetXLo, targetYLo  float32  // target coordinates of the Mandelbrot set
-	cRealHi,   cRealLo,
-	cImagHi,   cImagLo    float32  // complex constant term of the Julia set
+	frameCount        int      // tracks the number of frames rendered
+	paletteColors     []uint32 // pre-computed color palette
+	viewportWidth,             // tracks the width of the current frame's view of the complex plane
+	fps               float64  // fps imprecisely tracks FPS rendered
+	xRealHi, xRealLo,
+	yImagHi, yImagLo  float32  // target coordinates of the Mandelbrot set defined by 𝑓(𝑧) = 𝑧² + 𝑐
+	cRealHi, cRealLo,
+	cImagHi, cImagLo  float32  // complex constant term of the filled Julia set defined by 𝑓(𝑧) = 𝑧² + 𝑐
 }
 
 // gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
@@ -81,20 +81,20 @@ type assets struct {
 
 // renderer stores most runtime state.
 type renderer struct {
-	isJulia     bool
-	usePowScale uint32
-	state       *state
-	gpu         *gpu
-	assets      *assets
+	isJulia  bool
+	powScale uint32
+	state    *state
+	gpu      *gpu
+	assets   *assets
 }
 
 // uniforms stores per-frame uniforms.
 type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
-	paletteSize, usePowScale                      uint32
-	frameCount,  iterations                      float32 // block 1
-	width,       height,    scaleHi,   scaleLo   float32 // block 2
-	targetXHi,   targetYHi, targetXLo, targetYLo float32 // block 3
-	cRealHi,     cImagHi,   cRealLo,   cImagLo   float32 // block 4
+	paletteSize, powScale                   uint32
+	frameCount,  iterations                float32 // block 1
+	width,       height,  scaleHi, scaleLo float32 // block 2
+	xRealHi,     yImagHi, xRealLo, yImagLo float32 // block 3
+	cRealHi,     cImagHi, cRealLo, cImagLo float32 // block 4
 }
 
 func main() {
@@ -105,7 +105,7 @@ func main() {
 		currentRenderer atomic.Value
 	)
 
-	fractal, coords, err := flags(flag.CommandLine, os.Args[1:])
+	fractal, params, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
 		os.Exit(1)
@@ -115,20 +115,20 @@ func main() {
 	var p1, p2     float64 // TODO(jbunds): use better names for these overloaded variables
 	switch fractal {
 	case "julia":
-		p1, p2     = coords.cReal, coords.cImag
+		p1, p2     = params.cReal, params.cImag
 		shaderCode = commonShaderCode + "\n" + juliaShaderCode
 	default:
-		p1, p2     = coords.x, coords.y
+		p1, p2     = params.xReal, params.yImag
 		shaderCode = commonShaderCode + "\n" + mandelbrotShaderCode
 	}
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Mandelbrot").
-		WithTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, coords.name, p1, p2)).
+		WithTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, params.name, p1, p2)).
 		WithSize(mainWidth, mainHeight).
 		WithResizable(false))
 
-	currentRenderer.Store(newRenderer(fractal, coords))
+	currentRenderer.Store(newRenderer(fractal, params))
 
 	// GoGPU callback registrations and definitions
 
@@ -160,7 +160,7 @@ func main() {
 //		if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
 //			winMenu.AddItem(gogpu.MenuItem{Separator: true})
 //			winMenu.AddItem(gogpu.MenuItem{
-//				Title: fmt.Sprintf("mandelbrot - %s", coords.name),
+//				Title: fmt.Sprintf("mandelbrot - %s", params.name),
 //				Role:  gogpu.RoleShowAll,         // no RoleMaximize
 //				Role:  gogpu.RoleBringAllToFront, // no RoleMaximize
 //			})
@@ -219,31 +219,31 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(fractal string, coords coords) *renderer {
-	targetXHi, targetXLo := splitFloat64(coords.x)
-	targetYHi, targetYLo := splitFloat64(coords.y)
-	cRealHi,   cRealLo   := splitFloat64(coords.cReal)
-	cImagHi,   cImagLo   := splitFloat64(coords.cImag)
-	var usePowScale uint32
-	if coords.name == "airplane"    ||
-	   coords.name == "basilica"    ||
-	   coords.name == "cantor dust" ||
-	   coords.name == "rabbit"      ||
-	   coords.name == "siegel"      {
-		usePowScale = 1
+func newRenderer(fractal string, params params) *renderer {
+	xRealHi, xRealLo := splitFloat64(params.xReal)
+	yImagHi, yImagLo := splitFloat64(params.yImag)
+	cRealHi, cRealLo := splitFloat64(params.cReal)
+	cImagHi, cImagLo := splitFloat64(params.cImag)
+	var powScale uint32
+	if params.name == "airplane"    ||
+	   params.name == "basilica"    ||
+	   params.name == "cantor dust" ||
+	   params.name == "rabbit"      ||
+	   params.name == "siegel"      {
+		powScale = 1
 	}
 	return &renderer{
-		isJulia:     fractal == "julia",
-		usePowScale: usePowScale,
-		gpu:         new(gpu),
-		assets:      new(assets),
-		state:       &state{
+		isJulia:  fractal == "julia",
+		powScale: powScale,
+		gpu:      new(gpu),
+		assets:   new(assets),
+		state:    &state{
 			frameCount:    0,
 			viewportWidth: viewportWidth,
-			targetXHi:     targetXHi,
-			targetXLo:     targetXLo,
-			targetYHi:     targetYHi,
-			targetYLo:     targetYLo,
+			xRealHi:       xRealHi,
+			xRealLo:       xRealLo,
+			yImagHi:       yImagHi,
+			yImagLo:       yImagLo,
 			cRealHi:       cRealHi,
 			cRealLo:       cRealLo,
 			cImagHi:       cImagHi,
@@ -335,10 +335,10 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	}
 
 	unis := updateUniforms( // magnification logic
-		r.state.frameCount,    r.usePowScale,
+		r.state.frameCount,    r.powScale,
 		mainWidth,             mainHeight,
-		r.state.targetXHi,     r.state.targetXLo,
-		r.state.targetYHi,     r.state.targetYLo,
+		r.state.xRealHi,       r.state.xRealLo,
+		r.state.yImagHi,       r.state.yImagLo,
 		r.state.cRealHi,       r.state.cRealLo,
 		r.state.cImagHi,       r.state.cImagLo,
 		r.state.viewportWidth, iterations,
@@ -558,22 +558,23 @@ func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, f
 	return &view, release
 }
 
-// addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
+// addPointsMenu creates a "Points" menu to allow users to select a new points of interest
+// from a preset list of named parameters (target coordinates or complex constants).
 func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value) {
-	points     := pointsOfInterest()
+	points     := paramsOfInterest()
 	pointsMenu := gogpu.NewMenuWithTitle("Points")
 
 	for _, fractal := range slices.Sorted(maps.Keys(points)) {
 		fractalMenu := gogpu.NewMenu()
-		for _, coordsName := range slices.Sorted(maps.Keys(points[fractal])) {
+		for _, paramsName := range slices.Sorted(maps.Keys(points[fractal])) {
 			// TODO(jbunds): clean this up
-			p1, p2 := points[fractal][coordsName].x, points[fractal][coordsName].y
+			p1, p2 := points[fractal][paramsName].xReal, points[fractal][paramsName].yImag
 			if fractal == "julia" {
-				p1, p2 = points[fractal][coordsName].cReal, points[fractal][coordsName].cImag
+				p1, p2 = points[fractal][paramsName].cReal, points[fractal][paramsName].cImag
 			}
-			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", coordsName, p1, p2), Action: func() {
-				newRenderer := newRenderer(fractal, points[fractal][coordsName])
-				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new target coordinates
+			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", paramsName, p1, p2), Action: func() {
+				newRenderer := newRenderer(fractal, points[fractal][paramsName])
+				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new parameters
 				oldRenderer.release()
 				// TODO(jbunds): clean this up
 				shaderCode := commonShaderCode + "\n" + mandelbrotShaderCode
@@ -581,7 +582,7 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value) {
 					shaderCode = commonShaderCode + "\n" + juliaShaderCode
 				}
 				newRenderer.init(app, shaderCode)
-				app.SetTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, coordsName, p1, p2))
+				app.SetTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, paramsName, p1, p2))
 				app.PrimaryWindow().Show()
 				app.RequestRedraw()
 			}})
@@ -629,10 +630,10 @@ func (r *renderer) release() {
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
 	frameCount                int,
-	usePowScale,
+	powScale,
 	width,         height     uint32,
-	targetXHi,     targetXLo,
-	targetYHi,     targetYLo,
+	xRealHi,       xRealLo,
+	yImagHi,       yImagLo,
 	cRealHi,       cRealLo,
 	cImagHi,       cImagLo    float32,
 	viewportWidth, iterations float64) *uniforms {
@@ -643,17 +644,17 @@ func updateUniforms(
 		paletteSize: paletteSize,
 		scaleHi:     scaleHi,
 		scaleLo:     scaleLo,
-		usePowScale: usePowScale,
+		powScale:    powScale,
 
 		width:       float32(width),
 		height:      float32(height),
 		iterations:  float32(iterations),
 		frameCount:  float32(frameCount),
 
-		targetXHi:   targetXHi,
-		targetYHi:   targetYHi,
-		targetXLo:   targetXLo,
-		targetYLo:   targetYLo,
+		xRealHi:     xRealHi,
+		xRealLo:     xRealLo,
+		yImagHi:     yImagHi,
+		yImagLo:     yImagLo,
 
 		cRealHi:     cRealHi,
 		cRealLo:     cRealLo,

@@ -30,9 +30,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let screenY = f32(id.y);
   let minDim  = min(unis.width, unis.height);
 
-  let scale   = vec2<f32>(unis.scaleHi,   unis.scaleLo);
-  let targetX = vec2<f32>(unis.targetXHi, unis.targetXLo);
-  let targetY = vec2<f32>(unis.targetYHi, unis.targetYLo);
+  let scale   = vec2<f32>(unis.scaleHi, unis.scaleLo);
+  let targetX = vec2<f32>(unis.xRealHi, unis.xRealLo);
+  let targetY = vec2<f32>(unis.yImagHi, unis.yImagLo);
 
   let scaleX  = to_dd((screenX - (unis.width / 2.0)) / minDim);
   let scaleY  = to_dd((unis.height / 2.0 - screenY)  / minDim); // y-axis inverted; maps WebGPU coordinates to cartesian coordinates
