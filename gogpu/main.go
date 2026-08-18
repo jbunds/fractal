@@ -44,7 +44,7 @@ const (
 	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
 	viewportWidth      = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
 	scaleFactor        = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
-	growthRate         = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame
+	growthRate         = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame when rendering the Mandelbrot set
 	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
@@ -81,7 +81,7 @@ type assets struct {
 
 // renderer stores most runtime state.
 type renderer struct {
-	isJulia  bool
+	maxIter  func(int) float64
 	powScale uint32
 	state    *state
 	gpu      *gpu
@@ -91,7 +91,7 @@ type renderer struct {
 // uniforms stores per-frame uniforms.
 type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 	paletteSize, powScale                   uint32
-	frameCount,  iterations                float32 // block 1
+	frameCount,  maxIter                   float32 // block 1
 	width,       height,  scaleHi, scaleLo float32 // block 2
 	xRealHi,     yImagHi, xRealLo, yImagLo float32 // block 3
 	cRealHi,     cImagHi, cRealLo, cImagLo float32 // block 4
@@ -147,12 +147,12 @@ func main() {
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app, shaderCode)
 
-		// when appendAboutMenuItem is called before addPointsMenu, duplicate items are added to the main application menu
+		// when appendAboutMenuItem is called before addParamsMenu, duplicate items are added to the main application menu
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
-		//                the call to app.SetCustomMenu() in addPointsMenu() ?
-		cr.addPointsMenu(app, &currentRenderer)
+		//                the call to app.SetCustomMenu() in addParamsMenu() ?
+		cr.addParamsMenu(app, &currentRenderer)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
 		cr.appendAboutMenuItem(app, &currentRenderer, aboutWin)
@@ -173,6 +173,7 @@ func main() {
 			switch key {
 			case gpucontext.KeyQ: // ⌘+q
 				currentRenderer.Load().(*renderer).release()
+				gg.CloseAccelerator()
 				app.Quit()
 			case gpucontext.KeyW: // ⌘+w
 				if animToken.Load() != nil {
@@ -225,16 +226,34 @@ func newRenderer(fractal string, params params) *renderer {
 	cRealHi, cRealLo := splitFloat64(params.cReal)
 	cImagHi, cImagLo := splitFloat64(params.cImag)
 	var powScale uint32
-	if params.name == "airplane"    ||
-	   params.name == "basilica"    ||
-	   params.name == "cantor dust" ||
-	   params.name == "rabbit"      ||
-	   params.name == "siegel"      {
+	// TODO(jbunds): fix leaky abstraction
+	if params.name == "basilica"      ||
+	   params.name == "cantor dust"   ||
+	   params.name == "dendrite"      ||
+	   params.name == "rabbit"        ||
+	   params.name == "siegel"        ||
+	   params.name == "+0.37 + 0.16i" ||
+	   params.name == "+0.40 + 0.10i" ||
+	   params.name == "-0.50 - 0.56i" ||
+	   params.name == "-1.50 + 0.00i" {
 		powScale = 1
 	}
-	return &renderer{
-		isJulia:  fractal == "julia",
+
+	var maxIter func(int) float64
+	switch fractal {
+	case "julia":
+		maxIter = func(frameCount int) float64 {
+			return float64(baseIterations) + (float64(frameCount * frameCount) * 0.003)
+		}
+	default: // mandelbrot
+		maxIter = func(frameCount int) float64 {
+			return float64(baseIterations) + float64(frameCount) * growthRate
+		}
+	}
+
+return &renderer{
 		powScale: powScale,
+		maxIter:  maxIter,
 		gpu:      new(gpu),
 		assets:   new(assets),
 		state:    &state{
@@ -327,13 +346,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	r.state.viewportWidth *= scaleFactor
 	r.state.frameCount++
 
-	iterations := float64(baseIterations) + float64(r.state.frameCount) * growthRate // GPU fractal region-detection iterations
-
-	if r.isJulia {
-		// decent (except for siegel):
-		iterations = float64(baseIterations) + (float64(r.state.frameCount * r.state.frameCount) * 0.003)
-	}
-
 	unis := updateUniforms( // magnification logic
 		r.state.frameCount,    r.powScale,
 		mainWidth,             mainHeight,
@@ -341,7 +353,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		r.state.yImagHi,       r.state.yImagLo,
 		r.state.cRealHi,       r.state.cRealLo,
 		r.state.cImagHi,       r.state.cImagLo,
-		r.state.viewportWidth, iterations,
+		r.state.viewportWidth, r.maxIter(r.state.frameCount),
 	)
 
 	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
@@ -454,7 +466,7 @@ func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWi
 	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
 
 	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
-		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Points" menu before selecting the About menu item
+		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Params" menu before selecting the About menu item
 		err := canvas.Draw(func(cc *gg.Context) {
 			renderOnce.Do(func() {
 				view, release = ar.renderAboutWindow(cc)
@@ -558,22 +570,24 @@ func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, f
 	return &view, release
 }
 
-// addPointsMenu creates a "Points" menu to allow users to select a new points of interest
-// from a preset list of named parameters (target coordinates or complex constants).
-func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value) {
-	points     := paramsOfInterest()
-	pointsMenu := gogpu.NewMenuWithTitle("Points")
+// addParamsMenu creates a "Params" menu to allow users to select a new combination of
+// fractal ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
+// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
+// from a preset list of named parameters.
+func (r *renderer) addParamsMenu(app *gogpu.App, cr *atomic.Value) {
+	params     := paramsOfInterest()
+	paramsMenu := gogpu.NewMenuWithTitle("Params")
 
-	for _, fractal := range slices.Sorted(maps.Keys(points)) {
+	for _, fractal := range slices.Sorted(maps.Keys(params)) {
 		fractalMenu := gogpu.NewMenu()
-		for _, paramsName := range slices.Sorted(maps.Keys(points[fractal])) {
+		for _, paramsName := range slices.Sorted(maps.Keys(params[fractal])) {
 			// TODO(jbunds): clean this up
-			p1, p2 := points[fractal][paramsName].xReal, points[fractal][paramsName].yImag
+			p1, p2 := params[fractal][paramsName].xReal, params[fractal][paramsName].yImag
 			if fractal == "julia" {
-				p1, p2 = points[fractal][paramsName].cReal, points[fractal][paramsName].cImag
+				p1, p2 = params[fractal][paramsName].cReal, params[fractal][paramsName].cImag
 			}
 			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", paramsName, p1, p2), Action: func() {
-				newRenderer := newRenderer(fractal, points[fractal][paramsName])
+				newRenderer := newRenderer(fractal, params[fractal][paramsName])
 				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new parameters
 				oldRenderer.release()
 				// TODO(jbunds): clean this up
@@ -587,14 +601,14 @@ func (r *renderer) addPointsMenu(app *gogpu.App, cr *atomic.Value) {
 				app.RequestRedraw()
 			}})
 		}
-		pointsMenu.AddItem(gogpu.MenuItem{
+		paramsMenu.AddItem(gogpu.MenuItem{
 			Title:   cases.Title(language.English).String(fractal),
 			Submenu: fractalMenu})
 	}
 
 	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
 	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("points", pointsMenu)
+	app.SetCustomMenu("params", paramsMenu)
 }
 
 // fractalViewBindGroup creates the BindGroup holding the per-frame TextureView of the rendered fractal.
@@ -629,26 +643,26 @@ func (r *renderer) release() {
 
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
-	frameCount                int,
+	frameCount              int,
 	powScale,
-	width,         height     uint32,
+	width,         height   uint32,
 	xRealHi,       xRealLo,
 	yImagHi,       yImagLo,
 	cRealHi,       cRealLo,
-	cImagHi,       cImagLo    float32,
-	viewportWidth, iterations float64) *uniforms {
+	cImagHi,       cImagLo  float32,
+	viewportWidth, maxIter  float64) *uniforms {
 
 	scaleHi, scaleLo := splitFloat64(viewportWidth)
 
 	return &uniforms{
+		powScale:    powScale,
 		paletteSize: paletteSize,
 		scaleHi:     scaleHi,
 		scaleLo:     scaleLo,
-		powScale:    powScale,
 
 		width:       float32(width),
 		height:      float32(height),
-		iterations:  float32(iterations),
+		maxIter:     float32(maxIter),
 		frameCount:  float32(frameCount),
 
 		xRealHi:     xRealHi,

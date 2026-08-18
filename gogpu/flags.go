@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math"
 	"math/cmplx"
 	"os"
 	"path/filepath"
@@ -32,24 +33,38 @@ func paramsOfInterest() map[string]map[string]params {
 			"starburst": {name: "starburst",        xReal: -0.77568377,        yImag: 0.13646737       },
 		},
 		"julia": {
-			"spiral":   {name: "spiral",      cReal: -0.8,      cImag:  0.156   }, // default
-			"basilica": {name: "basilica",    cReal: -0.75,     cImag:  0.0     },
-			"cantor":   {name: "cantor dust", cReal:  0.4,      cImag:  0.1     },
-			"dendrite": {name: "dendrite",    cReal: -0.4,      cImag:  0.6     },
-			"rabbit":   {name: "rabbit",      cReal: -0.122561, cImag:  0.744862},
-			"siegel":   {name: "siegel",      cReal: -0.390541, cImag: -0.586788},
+			"spiral":        {name: "spiral galaxy", cReal: -0.8,           cImag:  0.156        }, // default
+			"basilica":      {name: "basilica",      cReal: -0.75,          cImag:  0.0          },
+			"cantor":        {name: "cantor dust",   cReal:  1.0,           cImag:  0.0          }, // TODO(jbunds): improve the rendering of this fractal
+			"dendrite":      {name: "dendrite",      cReal:  0.0,           cImag:  1.0          },
+			"golden":        {name: "golden",        cReal: math.Phi - 2.0, cImag: math.Phi - 1.0},
+			"rabbit":        {name: "rabbit",        cReal: -0.122561,      cImag:  0.744862     },
+			"siegel":        {name: "siegel",        cReal: -0.390541,      cImag: -0.586788     },
+			// most of these were taken from
+			// https://e.math.cornell.edu/people/belk/dynamicalsystems/NotesJuliaMandelbrot.pdf
+			// and i'm aware of no associated canonical names for any of these complex constants
+			"+0.37 + 0.16i": {name: "+0.37 + 0.16i", cReal:  0.37,          cImag:  0.16         },
+			"+0.40 + 0.10i": {name: "+0.40 + 0.10i", cReal:  0.40,          cImag:  0.10         },
+			"-0.40 + 0.60i": {name: "-0.40 + 0.60i", cReal: -0.40,          cImag:  0.60         },
+			"-0.50 - 0.56i": {name: "-0.50 - 0.56i", cReal: -0.50,          cImag: -0.56         },
+			"-0.75 + 0.25i": {name: "-0.75 + 0.25i", cReal: -0.75,          cImag:  0.25         }, // TODO(jbunds): improve the rendering of this fractal
+			"-1.50 + 0.00i": {name: "-1.50 + 0.00i", cReal: -1.50,          cImag:  0.00         },
 		},
 	}
-	for k, p := range params["julia"] {
-		if k == "siegel" || k == "spiral" {
+	for k, p := range params["julia"] { // locate interesting target coordinates to zoom in on, with some exceptions
+		switch k {
+		case "siegel",
+		     "spiral",
+		     "+0.37 + 0.16i",
+		     "-1.50 + 0.00i": // zoom in on the critical point (origin) rather than the α fixed point for these fractals
 			p.xReal, p.yImag   = 0, 0
 			params["julia"][k] = p
-			continue
+		default:
+			c := complex(p.cReal, p.cImag)
+			z := (1.0 - cmplx.Sqrt(1.0 - 4.0 * c)) / 2.0 // calculate the α fixed point by solving 𝑧² - 𝑧 + 𝑐 = 0
+			p.xReal, p.yImag   = real(z), imag(z)
+			params["julia"][k] = p
 		}
-		c := complex(p.cReal, p.cImag)
-		z := (1.0 - cmplx.Sqrt(1.0 - 4.0 * c)) / 2.0
-		p.xReal, p.yImag   = real(z), imag(z)
-		params["julia"][k] = p
 	}
 	return params
 }

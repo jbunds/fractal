@@ -8,25 +8,25 @@
 //   2. render the next frame in the background while the current frame is displayed and transformed according to the scale (zoom) level (https://www.youtube.com/watch?v=uc2yok_pLV4&t=413s )
 
 struct uniforms { // field declaration order must cohere with the corresponding Go struct field declaration order
-  paletteSize:  u32,
-  powScale:     u32,
-  frameCounter: f32,
-  iterations:   f32,
+  paletteSize: u32,
+  powScale:    u32,
+  frameCount:  f32,
+  maxIter:     f32,
 
-  width:        f32,
-  height:       f32,
-  scaleHi:      f32,
-  scaleLo:      f32,
+  width:       f32,
+  height:      f32,
+  scaleHi:     f32,
+  scaleLo:     f32,
 
-  xRealHi:      f32,
-  yImagHi:      f32,
-  xRealLo:      f32,
-  yImagLo:      f32,
+  xRealHi:     f32,
+  yImagHi:     f32,
+  xRealLo:     f32,
+  yImagLo:     f32,
 
-  cRealHi:      f32,
-  cImagHi:      f32,
-  cRealLo:      f32,
-  cImagLo:      f32,
+  cRealHi:     f32,
+  cImagHi:     f32,
+  cRealLo:     f32,
+  cImagLo:     f32,
 };
 
 // TODO(jbunds): consider using a 1D texture to store the color palette and sample it, since it may

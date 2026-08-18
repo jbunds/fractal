@@ -4,7 +4,7 @@ fn mandelbrot(cx: vec2<f32>, cy: vec2<f32>) -> f32 {
   var x2 = vec2<f32>(0.0);
   var y2 = vec2<f32>(0.0);
 
-  let limit = u32(unis.iterations);
+  let limit = u32(unis.maxIter);
   var i     = 0u;
 
   for (; i < limit; i++) {
@@ -17,7 +17,7 @@ fn mandelbrot(cx: vec2<f32>, cy: vec2<f32>) -> f32 {
     if (x2.x + y2.x > 4.0) { break; }
   }
 
-  if (i >= limit) { return unis.iterations; }
+  if (i >= limit) { return unis.maxIter; }
 
   return smoothIter(i, x2, y2);
 }
@@ -43,11 +43,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let iter    = mandelbrot(cx, cy);
 
   var color: vec4<f32>;
-  if (iter >= unis.iterations) {
+  if (iter >= unis.maxIter) {
     color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
   } else {
-    let dyn_div     = 80.0 + (unis.frameCounter * 0.4);
-    let clamped_div = min(dyn_div, unis.iterations);
+    let dyn_div     = 80.0 + (unis.frameCount * 0.4);
+    let clamped_div = min(dyn_div, unis.maxIter);
     let idx         = u32((iter / clamped_div) * f32(unis.paletteSize)) % unis.paletteSize;
     color           = unpack4x8unorm(palette[idx]);
   }

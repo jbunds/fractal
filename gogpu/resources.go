@@ -45,22 +45,23 @@ func initPalette() []uint32 {
 		t    := float64(i) / float64(paletteSize)
 		tAdj := 0.5 - 0.5 * math.Cos(t * 2.0 * math.Pi)
 		var r, g, b float64
-		if tAdj < 0.25 {
+		switch {
+		case tAdj < 0.25:
 			p := tAdj / 0.25
 			r  = c1r + (c2r - c1r) * p
 			g  = c1g + (c2g - c1g) * p
 			b  = c1b + (c2b - c1b) * p
-		} else if tAdj < 0.50 {
+		case tAdj < 0.50:
 			p := (tAdj - 0.25) / 0.25
 			r  = c2r + (c3r - c2r) * p
 			g  = c2g + (c3g - c2g) * p
 			b  = c2b + (c3b - c2b) * p
-		} else if tAdj < 0.75 {
+		case tAdj < 0.75:
 			p := (tAdj - 0.50) / 0.25
 			r  = c3r + (c4r - c3r) * p
 			g  = c3g + (c4g - c3g) * p
 			b  = c3b + (c4b - c3b) * p
-		} else {
+		default:
 			p := (tAdj - 0.75) / 0.25
 			r  = c4r + (c5r - c4r) * p
 			g  = c4g + (c5g - c4g) * p
