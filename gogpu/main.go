@@ -360,7 +360,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	unis := updateUniforms( // magnification logic
 		r.state.frameCount,    r.powScale,
-		mainWidth,             mainHeight,
 		r.state.xRealHi,       r.state.xRealLo,
 		r.state.yImagHi,       r.state.yImagLo,
 		r.state.cRealHi,       r.state.cRealLo,
@@ -471,8 +470,7 @@ func (r *renderer) release() {
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
 	frameCount              int,
-	powScale,
-	width,         height   uint32,
+	powScale                uint32,
 	xRealHi,       xRealLo,
 	yImagHi,       yImagLo,
 	cRealHi,       cRealLo,
@@ -487,8 +485,8 @@ func updateUniforms(
 		scaleHi:     scaleHi,
 		scaleLo:     scaleLo,
 
-		width:       float32(width),
-		height:      float32(height),
+		width:       float32(mainWidth),
+		height:      float32(mainHeight),
 		maxIter:     float32(maxIter),
 		frameCount:  float32(frameCount),
 
