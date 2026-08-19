@@ -26,7 +26,7 @@ func normalizeName(name string) string {
 	return name
 }
 
-// TODO(jbunds): refactor everything below
+// TODO(jbunds): refactor everything below; at least it's not in the hot path...
 
 // uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
 func uiLabels(params map[string]map[string]params) (map[string]map[string]labels, map[string][]string) {
