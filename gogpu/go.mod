@@ -1,4 +1,4 @@
-module mandelbrot/gogpu
+module fractal/gogpu
 
 go 1.25.0
 
