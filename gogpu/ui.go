@@ -24,20 +24,57 @@ type labels struct {
 	windowTitle  string
 }
 
-// isUnnamed returns true if the parameter has no associated canonical name.
-func isUnnamed(name string) bool {
-	return strings.HasPrefix(name, "+") || strings.HasPrefix(name, "-")
-}
+// TODO(jbunds): refactor addFractalsMenu & uiLabels (at least they're not in the hot path...)
 
-// normalizeName returns "unnamed" if the name starts with + or -, original name otherwise.
-func normalizeName(name string) string {
-	if isUnnamed(name) {
-		return "unnamed"
+// addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
+// fractal type ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
+// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
+// from a preset list of named (or unnamed) parameters.
+func addFractalsMenu(app *gogpu.App, cr *atomic.Value) {
+	params                  := paramsOfInterest()
+	labels, sortedMenuItems := uiLabels(params)
+	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
+
+	for _, fractalType := range slices.Sorted(maps.Keys(params)) {
+		fractalMenu := gogpu.NewMenu()
+		for _, paramsKey := range sortedMenuItems[fractalType] {
+			fractalMenu.AddItem(gogpu.MenuItem{Title: labels[fractalType][paramsKey].menuItemText, Action: func() {
+				newRenderer := newRenderer(fractalType, params[fractalType][paramsKey])
+				oldRenderer := cr.Swap(newRenderer).(*renderer)
+				oldRenderer.release()
+				shaderCode := commonShaderCode + "\n"
+				switch fractalType {
+				case "mandelbrot":
+					shaderCode += mandelbrotShaderCode
+				case "julia":
+					shaderCode += juliaShaderCode
+				}
+				newRenderer.init(app, shaderCode)
+				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
+				//               icon in the window's title bar, preferably by somehow hiding the primary window
+				//               instead of actually closing it, easily facilitating its reuse here
+				//
+				//               note that attempting to instantiate a new "primary" window here
+				//               via app.NewWindow() will crash the program
+				app.SetTitle(labels[fractalType][paramsKey].windowTitle)
+				if app.PrimaryWindow() == nil {
+					panic("app.PrimaryWindow() is nil")
+				}
+				app.RequestRedraw()
+				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
+				                           // on the "close window" icon in the primary window's title bar
+			}})
+		}
+		fractalsMenu.AddItem(gogpu.MenuItem{
+			Title:   cases.Title(language.English).String(fractalType),
+			Submenu: fractalMenu,
+		})
 	}
-	return name
-}
 
-// TODO(jbunds): refactor everything below; at least it's not in the hot path...
+	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
+	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
+	app.SetCustomMenu("fractals", fractalsMenu)
+}
 
 // uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
 func uiLabels(params map[string]map[string]params) (map[string]map[string]labels, map[string][]string) {
@@ -104,56 +141,6 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 	}
 
 	return labelEntries, sortedMenuItems
-}
-
-// addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
-// fractal type ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
-// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
-// from a preset list of named (or unnamed) parameters.
-func addFractalsMenu(app *gogpu.App, cr *atomic.Value) {
-	params                  := paramsOfInterest()
-	labels, sortedMenuItems := uiLabels(params)
-	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
-
-	for _, fractalType := range slices.Sorted(maps.Keys(params)) {
-		fractalMenu := gogpu.NewMenu()
-		for _, paramsKey := range sortedMenuItems[fractalType] {
-			fractalMenu.AddItem(gogpu.MenuItem{Title: labels[fractalType][paramsKey].menuItemText, Action: func() {
-				newRenderer := newRenderer(fractalType, params[fractalType][paramsKey])
-				oldRenderer := cr.Swap(newRenderer).(*renderer)
-				oldRenderer.release()
-				shaderCode := commonShaderCode + "\n"
-				switch fractalType {
-				case "mandelbrot":
-					shaderCode += mandelbrotShaderCode
-				case "julia":
-					shaderCode += juliaShaderCode
-				}
-				newRenderer.init(app, shaderCode)
-				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
-				//               icon in the window's title bar, preferably by somehow hiding the primary window
-				//               instead of actually closing it, easily facilitating its reuse here
-				//
-				//               note that attempting to instantiate a new "primary" window here
-				//               via app.NewWindow() will crash the program
-				app.SetTitle(labels[fractalType][paramsKey].windowTitle)
-				if app.PrimaryWindow() == nil {
-					panic("app.PrimaryWindow() is nil")
-				}
-				app.RequestRedraw()
-				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
-				                           // on the "close window" icon in the primary window's title bar
-			}})
-		}
-		fractalsMenu.AddItem(gogpu.MenuItem{
-			Title:   cases.Title(language.English).String(fractalType),
-			Submenu: fractalMenu,
-		})
-	}
-
-	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
-	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("fractals", fractalsMenu)
 }
 
 // appendAboutMenuItem appends an "About Fractal" menu item to the application
@@ -310,4 +297,17 @@ func renderAboutWindow(cc *gg.Context, fontFace text.Face) (*gpucontext.TextureV
 		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
 	}
 	return &view, release
+}
+
+// normalizeName returns "unnamed" if the name starts with + or -, original name otherwise.
+func normalizeName(name string) string {
+	if isUnnamed(name) {
+		return "unnamed"
+	}
+	return name
+}
+
+// isUnnamed returns true if the parameter has no associated canonical name.
+func isUnnamed(name string) bool {
+	return strings.HasPrefix(name, "+") || strings.HasPrefix(name, "-")
 }
