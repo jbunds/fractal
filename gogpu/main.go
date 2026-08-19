@@ -49,7 +49,7 @@ const (
 	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
-// state stores the application state (uniforms, color palette, and FPS stats).
+// state stores the application state (uniforms, color palette, viewport width, rendered frame count, and FPS).
 type state struct {
 	frameCount        int      // tracks the number of frames rendered
 	paletteColors     []uint32 // pre-computed color palette
@@ -136,11 +136,28 @@ func main() {
 		WithSize(mainWidth, mainHeight).
 		WithResizable(false))
 
+	app.SetQuitOnLastWindowClosed(false)
+
 	currentRenderer.Store(newRenderer(fractalType, params))
+
 
 	// GoGPU callback registrations and definitions
 
 	app.OnSurfaceAvailable(func() {
+
+		// TODO(jbunds): handle case where use clicks the "close window" icon in the far-left of the primary window's title bar
+
+		// will crash the program
+		//primWin := app.PrimaryWindow()
+		//primWin.SetOnClose(func() bool {
+		//	primWin.Hide()
+		//	return false
+		//})
+
+		// nasty, heavy-handed workaround: refuse to allow users to close the primary window
+		// the primary window can still be hidden via ⌘+w
+		app.PrimaryWindow().SetOnClose(func() bool { return false })
+
 		aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
 			WithTitle(""). // looks more slick and modern when combined with the transparent title bar triggered via WithHeaderAlignment(gogpu.HeaderAlignLeft) below
 			WithSize(aboutWidth, aboutHeight).
@@ -454,6 +471,12 @@ func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
 
 // release marks resources for deallocation.
 func (r *renderer) release() {
+
+	// TODO(jbunds): experiment with TrackResource:
+	//
+	//   https://pkg.go.dev/github.com/gogpu/gogpu#readme-resource-management
+	//   https://pkg.go.dev/github.com/gogpu/gogpu#App.TrackResource
+
 	if r.assets.fractalViewRelease != nil {
 		r.assets.fractalViewRelease()
 	}
@@ -526,9 +549,19 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value) {
 					shaderCode += juliaShaderCode
 				}
 				newRenderer.init(app, shaderCode)
+				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
+				//               icon in the window's title bar, preferably by somehow hiding the primary window
+				//               instead of actually closing it, easily facilitating its reuse here
+				//
+				//               note that attempting to instantiate a new "primary" window here
+				//               via app.NewWindow() will crash the program
 				app.SetTitle(labels[fractalType][paramsKey].windowTitle)
-				app.PrimaryWindow().Show()
+				if app.PrimaryWindow() == nil {
+					panic("app.PrimaryWindow() is nil")
+				}
 				app.RequestRedraw()
+				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
+				                           // on the "close window" icon in the primary window's title bar
 			}})
 		}
 		fractalsMenu.AddItem(gogpu.MenuItem{
@@ -550,13 +583,13 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 		//               application menu incorrectly renders a new frame to the primary window
 		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Settings…",        Role: gogpu.RolePreferences}).
+		AddItem(gogpu.MenuItem{Title: "Settings…",     Role: gogpu.RolePreferences}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Services",         Role: gogpu.RoleServices}).
+		AddItem(gogpu.MenuItem{Title: "Services",      Role: gogpu.RoleServices}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Hide Fractal",  Role: gogpu.RoleHide}).
-		AddItem(gogpu.MenuItem{Title: "Hide Others",      Role: gogpu.RoleHideOthers}).
-		AddItem(gogpu.MenuItem{Title: "Show All",         Role: gogpu.RoleShowAll}).
+		AddItem(gogpu.MenuItem{Title: "Hide Others",   Role: gogpu.RoleHideOthers}).
+		AddItem(gogpu.MenuItem{Title: "Show All",      Role: gogpu.RoleShowAll}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit}))
 
@@ -568,46 +601,15 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 //		Action: func() { aboutWin.Show() },
 //	})
 
-	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
-	if err != nil {
-		panic(err)
-	}
-
 	var (
-		renderOnce sync.Once
-		view       *gpucontext.TextureView
-		release    func()
+		release  func()
+		drawOnce sync.Once
 	)
 
-	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
-	offsetX := mainWidth  / 2.0 - aboutWidth  / 2.0
-	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
-
 	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
-		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Fractals" menu before selecting the About menu item
-		err := canvas.Draw(func(cc *gg.Context) {
-			renderOnce.Do(func() {
-				view, release = renderAboutWindow(cc, ar.assets.fontSource.Face(10))
-			})
-			cc.MarkFrameRendered() // ?
-
-			// composite the About window TextureView atop the background
-
-			cc.Push()                        // save pre-translation state
-			cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
-			cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
-			cc.Pop()                         // restore pre-translation state so the overlay and text remain unaffected by the translation
-			cc.SetRGBA(0, 0, 0, 0.6)
-			cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
-			cc.Fill()
-			cc.DrawGPUTexture(*view, 0, 0, aboutWidth, aboutHeight)
+		drawOnce.Do(func() {
+			release = drawAboutWindow(app, dc, cr)
 		})
-		if err != nil {
-			panic(err)
-		}
-		if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
-			panic(err)
-		}
 	})
 
 //		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
@@ -656,6 +658,50 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 //		}
 //		return true
 //	})
+}
+
+// drawAboutWindow draws the About window once on demand.
+func drawAboutWindow(app *gogpu.App, dc *gogpu.Context, cr *atomic.Value) func() {
+	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
+	if err != nil {
+		panic(err)
+	}
+
+	var (
+		renderOnce sync.Once
+		view       *gpucontext.TextureView
+		release    func()
+	)
+
+	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
+	offsetX := mainWidth  / 2.0 - aboutWidth  / 2.0
+	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
+
+	ar := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Fractals" menu before selecting the About menu item
+	err = canvas.Draw(func(cc *gg.Context) {
+		renderOnce.Do(func() {
+			view, release = renderAboutWindow(cc, ar.assets.fontSource.Face(10))
+		})
+		cc.MarkFrameRendered() // ?
+
+		// composite the About window TextureView atop the background
+
+		cc.Push()                        // save pre-translation state
+		cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
+		cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
+		cc.Pop()                         // restore pre-translation state so the overlay and text remain unaffected by the translation
+		cc.SetRGBA(0, 0, 0, 0.6)
+		cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
+		cc.Fill()
+		cc.DrawGPUTexture(*view, 0, 0, aboutWidth, aboutHeight)
+	})
+	if err != nil {
+		panic(err)
+	}
+	if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
+		panic(err)
+	}
+	return release
 }
 
 // renderAboutWindow renders the About window content to an off-screen texture.
