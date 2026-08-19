@@ -37,8 +37,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let targetX = vec2<f32>(unis.xRealHi, unis.xRealLo);
   let targetY = vec2<f32>(unis.yImagHi, unis.yImagLo);
 
-  let scaleX  = to_dd((screenX - (unis.width  / 2.0)) / minDim);
-  let scaleY  = to_dd((screenY - (unis.height / 2.0)) / minDim); // y-axis not inverted; viewport center == cartesian center
+  let scaleX  = to_dd((screenX - (unis.width / 2.0)) / minDim);
+  let scaleY  = to_dd((unis.height / 2.0 - screenY)  / minDim); // y-axis inverted; maps WebGPU coordinates to cartesian coordinates
 
   let cx      = dd_add(targetX, dd_mul(scaleX, scale));
   let cy      = dd_add(targetY, dd_mul(scaleY, scale));

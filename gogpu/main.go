@@ -1,4 +1,4 @@
-// Package mandelbrot/gogpu iteratively renders and magnifies the Mandelbrot or filled Julia set.
+// Package fractal/gogpu iteratively renders and magnifies fractals of the Mandelbrot or filled Julia set.
 //
 // Tested on a MacBook Air M1.
 package main
@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,30 +106,37 @@ func main() {
 		currentRenderer atomic.Value
 	)
 
-	fractal, params, err := flags(flag.CommandLine, os.Args[1:])
+	fractalType, params, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
 		os.Exit(1)
 	}
 
-	var shaderCode string
-	var p1, p2     float64 // TODO(jbunds): use better names for these overloaded variables
-	switch fractal {
+	displayName := params.name
+	if strings.ContainsAny(string(params.name[0]), "+-0") {
+		displayName = "unnamed"
+	}
+
+	var title string
+
+	shaderCode := commonShaderCode + "\n"
+
+	switch fractalType {
+	case "mandelbrot":
+		title       = fmt.Sprintf("%s - %s (%v, %vi)",      fractalType, displayName, params.xReal, params.yImag)
+		shaderCode += mandelbrotShaderCode
 	case "julia":
-		p1, p2     = params.cReal, params.cImag
-		shaderCode = commonShaderCode + "\n" + juliaShaderCode
-	default:
-		p1, p2     = params.xReal, params.yImag
-		shaderCode = commonShaderCode + "\n" + mandelbrotShaderCode
+		title       = fmt.Sprintf("%s - %s (c = %v + %vi)", fractalType, displayName, params.cReal, params.cImag)
+		shaderCode += juliaShaderCode
 	}
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithAppName("Mandelbrot").
-		WithTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, params.name, p1, p2)).
+		WithAppName("Fractal").
+		WithTitle(title).
 		WithSize(mainWidth, mainHeight).
 		WithResizable(false))
 
-	currentRenderer.Store(newRenderer(fractal, params))
+	currentRenderer.Store(newRenderer(fractalType, params))
 
 	// GoGPU callback registrations and definitions
 
@@ -147,15 +155,15 @@ func main() {
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app, shaderCode)
 
-		// when appendAboutMenuItem is called before addParamsMenu, duplicate items are added to the main application menu
+		// when appendAboutMenuItem is called before addFractalsMenu, duplicate items are added to the main application menu
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
-		//                the call to app.SetCustomMenu() in addParamsMenu() ?
-		cr.addParamsMenu(app, &currentRenderer)
+		//                the call to app.SetCustomMenu() in addFratcalsMenu() ?
+		addFractalsMenu(app, &currentRenderer)
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
-		cr.appendAboutMenuItem(app, &currentRenderer, aboutWin)
+		appendAboutMenuItem(app, &currentRenderer, aboutWin)
 
 //		if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
 //			winMenu.AddItem(gogpu.MenuItem{Separator: true})
@@ -220,7 +228,7 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(fractal string, params params) *renderer {
+func newRenderer(fractalType string, params params) *renderer {
 	xRealHi, xRealLo := splitFloat64(params.xReal)
 	yImagHi, yImagLo := splitFloat64(params.yImag)
 	cRealHi, cRealLo := splitFloat64(params.cReal)
@@ -231,7 +239,7 @@ func newRenderer(fractal string, params params) *renderer {
 	   params.name == "cantor dust"   ||
 	   params.name == "dendrite"      ||
 	   params.name == "rabbit"        ||
-	   params.name == "siegel"        ||
+	   params.name == "siegel disc"   ||
 	   params.name == "+0.37 + 0.16i" ||
 	   params.name == "+0.40 + 0.10i" ||
 	   params.name == "-0.50 - 0.56i" ||
@@ -240,18 +248,19 @@ func newRenderer(fractal string, params params) *renderer {
 	}
 
 	var maxIter func(int) float64
-	switch fractal {
-	case "julia":
-		maxIter = func(frameCount int) float64 {
-			return float64(baseIterations) + (float64(frameCount * frameCount) * 0.003)
-		}
-	default: // mandelbrot
+
+	switch fractalType {
+	case "mandelbrot":
 		maxIter = func(frameCount int) float64 {
 			return float64(baseIterations) + float64(frameCount) * growthRate
 		}
+	case "julia":
+		maxIter = func(frameCount int) float64 {
+			return float64(baseIterations) + (float64(frameCount * frameCount) * 0.003) // TODO(jbunds): clean this up
+		}
 	}
 
-return &renderer{
+	return &renderer{
 		powScale: powScale,
 		maxIter:  maxIter,
 		gpu:      new(gpu),
@@ -287,7 +296,6 @@ func (r *renderer) init(app *gogpu.App, shaderCode string) {
 		bgLayout1,
 		pipeline := initResources(r.gpu.device, shaderCode)
 
-
 	r.state.paletteColors = paletteColors
 	r.gpu.paletteBuf      = paletteBuf
 	r.gpu.uniformBuf      = uniformBuf
@@ -302,7 +310,11 @@ func (r *renderer) init(app *gogpu.App, shaderCode string) {
 
 	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12))
 
-	err = r.gpu.device.Queue().WriteBuffer(r.gpu.paletteBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&r.state.paletteColors[0])), len(r.state.paletteColors) * 4))
+	err = r.gpu.device.Queue().WriteBuffer(
+		r.gpu.paletteBuf, 0,
+		unsafe.Slice(
+			(*byte)(unsafe.Pointer(&r.state.paletteColors[0])),
+			len(r.state.paletteColors) * 4))
 	if err != nil {
 		panic(err)
 	}
@@ -356,7 +368,9 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		r.state.viewportWidth, r.maxIter(r.state.frameCount),
 	)
 
-	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
+	err := r.gpu.device.Queue().WriteBuffer(
+		r.gpu.uniformBuf, 0,
+		unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
 	if err != nil {
 		panic(err)
 	}
@@ -422,193 +436,6 @@ func (r *renderer) drawStats() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-// appendAboutMenuItem appends an "About Mandelbrot" menu item to the application
-// menu which renders a small window with some text when selected.
-func (r *renderer) appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
-	app.SetMenu(gogpu.NewMenu().
-		// TODO(jbunds): fix bug whereby selecting the custom "About Mandelbrot" item from the
-		//               application menu incorrectly renders a new frame to the primary window
-		AddItem(gogpu.MenuItem{Title: "About Mandelbrot", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Settings…",        Role: gogpu.RolePreferences}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Services",         Role: gogpu.RoleServices}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Hide Mandelbrot",  Role: gogpu.RoleHide}).
-		AddItem(gogpu.MenuItem{Title: "Hide Others",      Role: gogpu.RoleHideOthers}).
-		AddItem(gogpu.MenuItem{Title: "Show All",         Role: gogpu.RoleShowAll}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Quit Mandelbrot",  Role: gogpu.RoleQuit}))
-
-//	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
-//	appMenu.AddItem(gogpu.MenuItem{Separator: true})
-//	appMenu.AddItem(gogpu.MenuItem{
-//		Title:  " \u24D8  About Mandelbrot", // or " ⓘ   About Mandelbrot"
-//		Role:   gogpu.RoleAbout, // doesn't prepend the "circled i" system icon to the title like RolePreferences (gear icon) or RoleQuit ("boxed x" icon) roles do
-//		Action: func() { aboutWin.Show() },
-//	})
-
-	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
-	if err != nil {
-		panic(err)
-	}
-
-	var (
-		renderOnce sync.Once
-		view       *gpucontext.TextureView
-		release    func()
-	)
-
-	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
-	offsetX := mainWidth  / 2.0 - aboutWidth  / 2.0
-	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
-
-	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
-		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Params" menu before selecting the About menu item
-		err := canvas.Draw(func(cc *gg.Context) {
-			renderOnce.Do(func() {
-				view, release = ar.renderAboutWindow(cc)
-			})
-			cc.MarkFrameRendered() // ?
-
-			// composite the About window TextureView atop the background
-
-			cc.Push()                        // save pre-translation state
-			cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
-			cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
-			cc.Pop()                         // restore pre-translation state so the overlay and text remain unaffected by the translation
-			cc.SetRGBA(0, 0, 0, 0.6)
-			cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
-			cc.Fill()
-			cc.DrawGPUTexture(*view, 0, 0, aboutWidth, aboutHeight)
-		})
-		if err != nil {
-			panic(err)
-		}
-		if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
-			panic(err)
-		}
-	})
-
-//		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-//fmt.Println("HERE")
-//			if mods.HasSuper() {
-//				switch key {
-//				case gpucontext.KeyW: // ⌘+w
-//					aboutWin.Close()
-//				case gpucontext.KeyQ: // ⌘+q
-//					cr.Load().(*renderer).release()
-//					app.Quit()
-//				}
-//			}
-//		})
-//
-	aboutWin.SetOnClose(func() bool {
-		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
-		if release != nil {
-			release()
-		}
-		return true
-	})
-
-	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-	//
-	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
-	// "About Mandelbrot" window is focused and ⌘+w is pressed, the primary window closes
-	//
-	// TODO(jbunds): intercept ⌘+w and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+w is pressed
-	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
-	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-
-//	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-//		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
-//		// why is https://pkg.go.dev/github.com/gogpu/gogpu#App.HasFocus a method on App instead of Window ?
-//		// https://pkg.go.dev/github.com/gogpu/gpucontext#FocusEvent
-//		//aboutWin.HasFocus()
-//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
-//			aboutWin.Close()
-//		}
-//	})
-//
-//	aboutWin.SetOnClose(func() bool {
-//		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
-//		if release != nil {
-//			release()
-//		}
-//		return true
-//	})
-}
-
-// renderAboutWindow renders the About window content to an off-screen texture.
-func (r *renderer) renderAboutWindow(cc *gg.Context) (*gpucontext.TextureView, func()) {
-	view, release := cc.CreateOffscreenTexture(aboutWidth, aboutHeight)
-	if release == nil {
-		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
-	}
-
-	cc.BeginGPUFrame()
-	cc.ClearWithColor(gg.Transparent)
-
-	// background
-	cc.SetColor(gg.Transparent)
-	cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
-	cc.Fill()
-
-	// foreground
-	cc.SetColor(gg.White)
-	cc.SetFont(r.assets.fontSource.Face(10))
-	cc.DrawString("Mandelbrot 1.0",   15, 30)
-	cc.DrawString("Jeff Bunds",       15, 50)
-	cc.DrawString("Copyright © 2026", 15, 70)
-	cc.Fill()
-
-	if err := cc.FlushGPUWithViewPreserveContent(view, aboutWidth, aboutHeight); err != nil {
-		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
-	}
-	return &view, release
-}
-
-// addParamsMenu creates a "Params" menu to allow users to select a new combination of
-// fractal ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
-// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
-// from a preset list of named parameters.
-func (r *renderer) addParamsMenu(app *gogpu.App, cr *atomic.Value) {
-	params     := paramsOfInterest()
-	paramsMenu := gogpu.NewMenuWithTitle("Params")
-
-	for _, fractal := range slices.Sorted(maps.Keys(params)) {
-		fractalMenu := gogpu.NewMenu()
-		for _, paramsName := range slices.Sorted(maps.Keys(params[fractal])) {
-			// TODO(jbunds): clean this up
-			p1, p2 := params[fractal][paramsName].xReal, params[fractal][paramsName].yImag
-			if fractal == "julia" {
-				p1, p2 = params[fractal][paramsName].cReal, params[fractal][paramsName].cImag
-			}
-			fractalMenu.AddItem(gogpu.MenuItem{Title: fmt.Sprintf("%s:  %v, %vi", paramsName, p1, p2), Action: func() {
-				newRenderer := newRenderer(fractal, params[fractal][paramsName])
-				oldRenderer := cr.Swap(newRenderer).(*renderer) // replaces currentRenderer in main() scope to reset the render cycle with new parameters
-				oldRenderer.release()
-				// TODO(jbunds): clean this up
-				shaderCode := commonShaderCode + "\n" + mandelbrotShaderCode
-				if fractal == "julia" {
-					shaderCode = commonShaderCode + "\n" + juliaShaderCode
-				}
-				newRenderer.init(app, shaderCode)
-				app.SetTitle(fmt.Sprintf("%s - %s (c = %v, %vi)", fractal, paramsName, p1, p2))
-				app.PrimaryWindow().Show()
-				app.RequestRedraw()
-			}})
-		}
-		paramsMenu.AddItem(gogpu.MenuItem{
-			Title:   cases.Title(language.English).String(fractal),
-			Submenu: fractalMenu})
-	}
-
-	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
-	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("params", paramsMenu)
 }
 
 // fractalViewBindGroup creates the BindGroup holding the per-frame TextureView of the rendered fractal.
@@ -677,15 +504,196 @@ func updateUniforms(
 	}
 }
 
+// addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
+// fractal type ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
+// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
+// from a preset list of named (or unnamed) parameters.
+func addFractalsMenu(app *gogpu.App, cr *atomic.Value) {
+	params                  := paramsOfInterest()
+	labels, sortedMenuItems := uiLabels(params)
+	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
+
+	for _, fractalType := range slices.Sorted(maps.Keys(params)) {
+		fractalMenu := gogpu.NewMenu()
+		for _, paramsKey := range sortedMenuItems[fractalType] {
+			fractalMenu.AddItem(gogpu.MenuItem{Title: labels[fractalType][paramsKey].menuItemText, Action: func() {
+				newRenderer := newRenderer(fractalType, params[fractalType][paramsKey])
+				oldRenderer := cr.Swap(newRenderer).(*renderer)
+				oldRenderer.release()
+				shaderCode := commonShaderCode + "\n"
+				switch fractalType {
+				case "mandelbrot":
+					shaderCode += mandelbrotShaderCode
+				case "julia":
+					shaderCode += juliaShaderCode
+				}
+				newRenderer.init(app, shaderCode)
+				app.SetTitle(labels[fractalType][paramsKey].windowTitle)
+				app.PrimaryWindow().Show()
+				app.RequestRedraw()
+			}})
+		}
+		fractalsMenu.AddItem(gogpu.MenuItem{
+			Title:   cases.Title(language.English).String(fractalType),
+			Submenu: fractalMenu,
+		})
+	}
+
+	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
+	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
+	app.SetCustomMenu("fractals", fractalsMenu)
+}
+
+// appendAboutMenuItem appends an "About Fractal" menu item to the application
+// menu which renders a small window with some text when selected.
+func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
+	app.SetMenu(gogpu.NewMenu().
+		// TODO(jbunds): fix bug whereby selecting the custom "About Fractal" item from the
+		//               application menu incorrectly renders a new frame to the primary window
+		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Settings…",        Role: gogpu.RolePreferences}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Services",         Role: gogpu.RoleServices}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Hide Fractal",  Role: gogpu.RoleHide}).
+		AddItem(gogpu.MenuItem{Title: "Hide Others",      Role: gogpu.RoleHideOthers}).
+		AddItem(gogpu.MenuItem{Title: "Show All",         Role: gogpu.RoleShowAll}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit}))
+
+//	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
+//	appMenu.AddItem(gogpu.MenuItem{Separator: true})
+//	appMenu.AddItem(gogpu.MenuItem{
+//		Title:  " \u24D8  About Fractal", // or " ⓘ   About Fractal"
+//		Role:   gogpu.RoleAbout, // doesn't prepend the "circled i" system icon to the title like RolePreferences (gear icon) or RoleQuit ("boxed x" icon) roles do
+//		Action: func() { aboutWin.Show() },
+//	})
+
+	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
+	if err != nil {
+		panic(err)
+	}
+
+	var (
+		renderOnce sync.Once
+		view       *gpucontext.TextureView
+		release    func()
+	)
+
+	// assumes the bimedians (perpendicular bisectors) of both windows (primary and About) are aligned
+	offsetX := mainWidth  / 2.0 - aboutWidth  / 2.0
+	offsetY := mainHeight / 2.0 - aboutHeight / 2.0
+
+	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
+		ar  := cr.Load().(*renderer) // in case the user selects one of the menu items from the "Fractals" menu before selecting the About menu item
+		err := canvas.Draw(func(cc *gg.Context) {
+			renderOnce.Do(func() {
+				view, release = renderAboutWindow(cc, ar.assets.fontSource.Face(10))
+			})
+			cc.MarkFrameRendered() // ?
+
+			// composite the About window TextureView atop the background
+
+			cc.Push()                        // save pre-translation state
+			cc.Translate(-offsetX, -offsetY) // align the background of the About window with the fractal image beneath
+			cc.DrawGPUTextureBase(ar.assets.fractalView, 0, 0, aboutWidth, aboutHeight)
+			cc.Pop()                         // restore pre-translation state so the overlay and text remain unaffected by the translation
+			cc.SetRGBA(0, 0, 0, 0.6)
+			cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
+			cc.Fill()
+			cc.DrawGPUTexture(*view, 0, 0, aboutWidth, aboutHeight)
+		})
+		if err != nil {
+			panic(err)
+		}
+		if err := canvas.Render(dc.RenderTarget()); err != nil { // or canvas.RenderTo(dc.AsTextureDrawer())
+			panic(err)
+		}
+	})
+
+//		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+//			if mods.HasSuper() {
+//				switch key {
+//				case gpucontext.KeyW: // ⌘+w
+//					aboutWin.Close()
+//				case gpucontext.KeyQ: // ⌘+q
+//					cr.Load().(*renderer).release()
+//					app.Quit()
+//				}
+//			}
+//		})
+
+	aboutWin.SetOnClose(func() bool {
+//		app.PrimaryWindow().Show() // properly handle the primary window losing focus
+		if release != nil {
+			release()
+		}
+		return true
+	})
+
+	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
+	//
+	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
+	// "About Fractal" window is focused and ⌘+w is pressed, the primary window closes
+	//
+	// TODO(jbunds): intercept ⌘+w and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+w is pressed
+	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
+	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
+
+//	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+//		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
+//		// why is https://pkg.go.dev/github.com/gogpu/gogpu#App.HasFocus a method on App instead of Window ?
+//		// https://pkg.go.dev/github.com/gogpu/gpucontext#FocusEvent
+//		//aboutWin.HasFocus()
+//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
+//			aboutWin.Close()
+//		}
+//	})
+//
+//	aboutWin.SetOnClose(func() bool {
+//		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
+//		if release != nil {
+//			release()
+//		}
+//		return true
+//	})
+}
+
+// renderAboutWindow renders the About window content to an off-screen texture.
+func renderAboutWindow(cc *gg.Context, fontFace text.Face) (*gpucontext.TextureView, func()) {
+	view, release := cc.CreateOffscreenTexture(aboutWidth, aboutHeight)
+	if release == nil {
+		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
+	}
+
+	cc.BeginGPUFrame()
+	cc.ClearWithColor(gg.Transparent)
+
+	cc.SetColor(gg.Transparent) // background
+	cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
+	cc.Fill()
+
+	cc.SetColor(gg.White)       // foreground
+	cc.SetFont(fontFace)
+	cc.DrawString("Fractal 1.0",      15, 30)
+	cc.DrawString("Jeff Bunds",       15, 50)
+	cc.DrawString("Copyright © 2026", 15, 70)
+	cc.Fill()
+
+	if err := cc.FlushGPUWithViewPreserveContent(view, aboutWidth, aboutHeight); err != nil {
+		fmt.Fprint(os.Stderr, "GPU unavailable") // TODO(jbunds): implement CPU fallback ?
+	}
+	return &view, release
+}
+
 // toggleAnimation toggles between pausing and resuming the animation loop,
 // e.g., when the spacebar is pressed, or when the primary window is hidden.
 func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]) {
-	// TODO(jbunds): fix the bug where animation is not actually toggled when the "About Mandelbrot" window has focus
+	// TODO(jbunds): fix the bug where animation is not actually toggled when the "About Fractal" window has focus
 	if oldToken := token.Swap(nil); oldToken != nil {
-//fmt.Println("suspending animation")
 		oldToken.Stop()
 	} else {
-//fmt.Println("resuming animation")
 		token.Store(app.StartAnimation())
 	}
 }

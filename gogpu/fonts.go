@@ -26,7 +26,7 @@ func loadFontSource() (*text.FontSource, error) {
 
 // findSystemFont returns the path to a TTF font found on the system.
 func findSystemFont() string {
-	candidates := []string{
+	candidates := []string{ // halfhearted attempt at portability
 		// Windows
 		"C:\\Windows\\Fonts\\arial.ttf",
 		"C:\\Windows\\Fonts\\calibri.ttf",
