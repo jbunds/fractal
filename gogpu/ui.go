@@ -56,16 +56,16 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 	for _, fractalType := range fractalTypes {
 		labelEntries[fractalType] = make(map[string]labels)
 		
-		keys := slices.SortedFunc(maps.Keys(params[fractalType]), func(a, b string) int {
+		sortedMenuItemKeys := slices.SortedFunc(maps.Keys(params[fractalType]), func(a, b string) int {
 			prioA := 0; if isUnnamed(params[fractalType][a].name) { prioA = 1 }
 			prioB := 0; if isUnnamed(params[fractalType][b].name) { prioB = 1 }
 			if prioA != prioB { return prioA - prioB }
 			return strings.Compare(a, b)
 		})
 
-		sortedMenuItems[fractalType] = keys
+		sortedMenuItems[fractalType] = sortedMenuItemKeys
 
-		for _, key := range keys {
+		for _, key := range sortedMenuItemKeys {
 			p           := params[fractalType][key]
 			displayName := normalizeName(p.name)
 			
