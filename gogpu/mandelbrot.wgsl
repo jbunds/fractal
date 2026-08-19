@@ -49,7 +49,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let dyn_div     = 80.0 + (unis.frameCount * 0.4);
     let clamped_div = min(dyn_div, unis.maxIter);
     let idx         = u32((iter / clamped_div) * f32(unis.paletteSize)) % unis.paletteSize;
-    color           = unpack4x8unorm(palette[idx]);
+    color           = unpack4x8unorm(textureLoad(palette, i32(idx)).x);
   }
 
   textureStore(screenTex, vec2<u32>(id.xy), color);

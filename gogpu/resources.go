@@ -13,7 +13,7 @@ func initResources(
 	shaderCode string,
 ) (
 	[]uint32,
-	*wgpu.Buffer,
+	*wgpu.Texture,
 	*wgpu.Buffer,
 	*wgpu.BindGroupLayout,
 	*wgpu.BindGroupLayout,
@@ -24,13 +24,13 @@ func initResources(
 		panic(err)
 	}
 
-	paletteColors, paletteBuf := initPaletteBuf(device)
+	paletteColors, paletteTex := initPaletteTex(device)
 	uniformBuf                := initUniformBuf(device)
 	bgLayout0, bgLayout1      := initBindGroupLayouts(device)
 	layout                    := initPipelineLayout(device, bgLayout0, bgLayout1)
 	pipeline                  := initPipeline(device, layout, shader)
 
-	return paletteColors, paletteBuf, uniformBuf, bgLayout0, bgLayout1, pipeline
+	return paletteColors, paletteTex, uniformBuf, bgLayout0, bgLayout1, pipeline
 }
 
 // initPalette initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
@@ -73,16 +73,20 @@ func initPalette() []uint32 {
 }
 
 // initPaletteBuf initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
-func initPaletteBuf(device *wgpu.Device) ([]uint32, *wgpu.Buffer) {
+func initPaletteTex(device *wgpu.Device) ([]uint32, *wgpu.Texture) {
 	paletteColors   := initPalette()
-	paletteBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
-		Size:  uint64(len(paletteColors) * 4),
-		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
+	paletteTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Size:          wgpu.Extent3D{Width: paletteSize, Height: 1, DepthOrArrayLayers: 1},
+		SampleCount:   1,
+		MipLevelCount: 1,
+		Dimension:     wgpu.TextureDimension1D,
+		Format:        gputypes.TextureFormatR32Uint,
+		Usage:         wgpu.TextureUsageTextureBinding | wgpu.TextureUsageCopyDst,
 	})
 	if err != nil {
 		panic(err)
 	}
-	return paletteColors, paletteBuf
+	return paletteColors, paletteTex
 }
 
 // initUniformBuf initializes the uniform buffer used to pass uniforms to the GPU shader.
@@ -108,7 +112,10 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 			}, { // pre-computed 2000-color palette
 				Binding:    1,
 				Visibility: wgpu.ShaderStageCompute,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage},
+				Texture:    &gputypes.TextureBindingLayout{
+					SampleType:    gputypes.TextureSampleTypeUint,
+					ViewDimension: gputypes.TextureViewDimension1D,
+				},
 			},
 		},
 	})

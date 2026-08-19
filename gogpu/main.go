@@ -20,6 +20,7 @@ import (
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -61,7 +62,7 @@ type state struct {
 // gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
 type gpu struct {
 	device          *wgpu.Device          // logical GPU device
-	paletteBuf      *wgpu.Buffer          // pre-computed color palette buffer
+	paletteTex      *wgpu.Texture         // pre-computed color palette 1D texture
 	uniformBuf      *wgpu.Buffer          // uniforms buffer
 	staticBindGroup *wgpu.BindGroup       // uniforms and color palette buffer
 	bgLayout0       *wgpu.BindGroupLayout // uniforms and color palette layout
@@ -73,6 +74,7 @@ type gpu struct {
 type assets struct {
 	canvas             *ggcanvas.Canvas       // wraps gg.Context
 	fontSource         *text.FontSource       // font used to render per-frame stats
+	paletteView        *wgpu.TextureView      // handle to the color palette 1D texture view
 	fractalView        gpucontext.TextureView // handle to the fractal texture view
 	fractalViewRelease func()                 // fractal TextureView release function
 }
@@ -296,6 +298,8 @@ func newRenderer(fractalType string, params params) *renderer {
 
 // init initializes all resources required to render frames in the main application window.
 func (r *renderer) init(app *gogpu.App, shaderCode string) {
+	// TODO(jbunds): cache / memoize all runtime-invariant resources,
+	//               e.g., color palette and associated downstream gogpu objects
 	var err error
 	r.assets.fontSource, err = loadFontSource()
 	if err != nil {
@@ -304,14 +308,14 @@ func (r *renderer) init(app *gogpu.App, shaderCode string) {
 	r.gpu.device = app.DeviceProvider().Device()
 
 	paletteColors,
-		paletteBuf,
+		paletteTex,
 		uniformBuf,
 		bgLayout0,
 		bgLayout1,
 		pipeline := initResources(r.gpu.device, shaderCode)
 
 	r.state.paletteColors = paletteColors
-	r.gpu.paletteBuf      = paletteBuf
+	r.gpu.paletteTex      = paletteTex
 	r.gpu.uniformBuf      = uniformBuf
 	r.gpu.bgLayout0       = bgLayout0
 	r.gpu.bgLayout1       = bgLayout1
@@ -324,11 +328,21 @@ func (r *renderer) init(app *gogpu.App, shaderCode string) {
 
 	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12))
 
-	err = r.gpu.device.Queue().WriteBuffer(
-		r.gpu.paletteBuf, 0,
+	r.assets.paletteView, err = r.gpu.device.CreateTextureView(r.gpu.paletteTex, &wgpu.TextureViewDescriptor{
+		Format:    gputypes.TextureFormatR32Uint,
+		Dimension: gputypes.TextureViewDimension1D,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	err = r.gpu.device.Queue().WriteTexture(
+		&wgpu.ImageCopyTexture{Texture: paletteTex},
 		unsafe.Slice(
 			(*byte)(unsafe.Pointer(&r.state.paletteColors[0])),
-			len(r.state.paletteColors) * 4))
+			len(r.state.paletteColors) * 4),
+		&wgpu.ImageDataLayout{BytesPerRow: paletteSize * 4},
+		&wgpu.Extent3D{Width: paletteSize, Height: 1, DepthOrArrayLayers: 1})
 	if err != nil {
 		panic(err)
 	}
@@ -336,8 +350,8 @@ func (r *renderer) init(app *gogpu.App, shaderCode string) {
 	r.gpu.staticBindGroup, err = r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Layout:  r.gpu.bgLayout0,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Size: 64,                      Buffer: r.gpu.uniformBuf},
-			{Binding: 1, Size: uint64(paletteSize * 4), Buffer: r.gpu.paletteBuf},
+			{Binding: 0, Size: 64, Buffer: r.gpu.uniformBuf},
+			{Binding: 1, TextureView: r.assets.paletteView},
 		},
 	})
 	if err != nil {
@@ -479,10 +493,11 @@ func (r *renderer) release() {
 	}
 	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
+	r.assets.paletteView.Release()
 	r.gpu.pipeline.Release()
 	r.gpu.bgLayout0.Release()
 	r.gpu.bgLayout1.Release()
-	r.gpu.paletteBuf.Release()
+	r.gpu.paletteTex.Release()
 	r.gpu.uniformBuf.Release()
 	r.gpu.staticBindGroup.Release()
 }

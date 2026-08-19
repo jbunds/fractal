@@ -29,17 +29,9 @@ struct uniforms { // field declaration order must cohere with the corresponding 
   cImagLo:     f32,
 };
 
-// TODO(jbunds): consider using a 1D texture to store the color palette and sample it, since it may
-//               be faster than using a storage buffer due to GPU texture caching optimizations:
-//
-//   @group(0) @binding(1) var paletteTexture: texture_1d<f32>;
-//   @group(0) @binding(2) var paletteSampler: sampler;
-//
-//   let color = textureSampleLevel(paletteTexture, paletteSampler, vec2<f32>(smoothIter * scale, 0.5), 0.0).rgb;
-
-@group(0) @binding(0) var<uniform>       unis      : uniforms;
-@group(0) @binding(1) var<storage, read> palette   : array<u32>;
-@group(1) @binding(0) var                screenTex : texture_storage_2d<bgra8unorm, write>;
+@group(0) @binding(0) var<uniform> unis      : uniforms;
+@group(0) @binding(1) var          palette   : texture_1d<u32>;
+@group(1) @binding(0) var          screenTex : texture_storage_2d<bgra8unorm, write>;
 
 // emulated 64-bit floating-point arithmetic functions
 

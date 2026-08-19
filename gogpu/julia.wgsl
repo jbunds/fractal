@@ -54,7 +54,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let t_power  = pow(t_log, 1.8);
     let normal_t = select(t_linear, t_power, unis.powScale == 1u);
     let idx      = u32(normal_t * f32(unis.paletteSize)) % unis.paletteSize;
-    color        = unpack4x8unorm(palette[idx]);
+    color        = unpack4x8unorm(textureLoad(palette, i32(idx)).x);
   }
 
   textureStore(screenTex, vec2<u32>(id.xy), color);
