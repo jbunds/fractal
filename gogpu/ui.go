@@ -71,7 +71,7 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 			
 			switch fractalType {
 			case "mandelbrot":
-				displayXReal := fmt.Sprintf("%v", p.xReal) // hack...
+				displayXReal := fmt.Sprintf("%v", p.xReal) // hack to avoid using strconv
 				if !strings.HasPrefix(displayXReal, "-") {
 					displayXReal = " " + fmt.Sprintf("%v", p.xReal)
 				}
@@ -80,7 +80,7 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 					windowTitle:  fmt.Sprintf(format["window"][fractalType], fractalType, displayName,  p.xReal, p.yImag),
 				}
 			case "julia":
-				displayCReal := fmt.Sprintf("%v", p.cReal) // hack...
+				displayCReal := fmt.Sprintf("%v", p.cReal) // hack to avoid using strconv
 				if !strings.HasPrefix(displayCReal, "-") {
 					displayCReal = " " + fmt.Sprintf("%v", p.cReal)
 				}

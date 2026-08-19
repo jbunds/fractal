@@ -10,17 +10,17 @@ import (
 	"strings"
 )
 
-// params represents a named preset set of parameters:
+// params represents a named (or unnamed) preset set of parameters:
 //   - the real and imaginary (x, y) coordinates of a target point of interest in the Mandelbrot set; or
-//   - the real and imaginary components of the complex term (𝑐) which defines the filled Julia set
+//   - the real and imaginary components of the complex term 𝑐 in 𝑓(𝑧) = 𝑧² + 𝑐 which defines the filled Julia set
 type params struct {
 	name         string
 	cReal, cImag float64
 	xReal, yImag float64
 }
 
-// paramsOfInterest returns a map of named preset parameters used to
-// render a fractal and zoom in on interesting locations therein.
+// paramsOfInterest returns a map of named (or unnamed) preset parameters used
+// to render a fractal and zoom in on a location deemed interesting therein.
 func paramsOfInterest() map[string]map[string]params {
 	params := map[string]map[string]params{
 		"mandelbrot": {

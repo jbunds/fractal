@@ -37,16 +37,17 @@ var mandelbrotShaderCode string
 var juliaShaderCode string
 
 const (
-	mainWidth          = 800   // primary window logical width
-	mainHeight         = 800   // primary window logical height
-	aboutWidth         = 240   // about window logical width
-	aboutHeight        = 164   // about window logical height
-	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
-	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
-	viewportWidth      = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
-	scaleFactor        = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
-	growthRate         = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame when rendering the Mandelbrot set
-	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
+	mainWidth             = 800   // primary window logical width
+	mainHeight            = 800   // primary window logical height
+	aboutWidth            = 240   // about window logical width
+	aboutHeight           = 164   // about window logical height
+	baseIterations        = 500   // initial number of iterations used to compute interior boundaries
+	paletteSize           = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
+	viewportWidth         = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
+	scaleFactor           = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
+	linearGrowthFactor    = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame when rendering Mandelbrot fractals
+	quadraticGrowthFactor = 0.003 // multiplicative factor by which boundary calculation iterations increase per the square of the frame count when rendering Julia fractals
+	maxPrecisionFrames    = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
 // state stores the application state (uniforms, color palette, viewport width, rendered frame count, and FPS).
@@ -113,7 +114,7 @@ func main() {
 	}
 
 	displayName := params.name
-	if strings.ContainsAny(string(params.name[0]), "+-0") {
+	if strings.ContainsAny(string(params.name[0]), "+-0") { // hack to avoid using regexp
 		displayName = "unnamed"
 	}
 
@@ -269,11 +270,11 @@ func newRenderer(fractalType string, params params) *renderer {
 	switch fractalType {
 	case "mandelbrot":
 		maxIter = func(frameCount int) float64 {
-			return float64(baseIterations) + float64(frameCount) * growthRate
+			return float64(baseIterations) + float64(frameCount) * linearGrowthFactor
 		}
 	case "julia":
 		maxIter = func(frameCount int) float64 {
-			return float64(baseIterations) + (float64(frameCount * frameCount) * 0.003) // TODO(jbunds): clean this up
+			return float64(baseIterations) + (float64(frameCount * frameCount) * quadraticGrowthFactor)
 		}
 	}
 
