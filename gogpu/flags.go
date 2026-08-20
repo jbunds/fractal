@@ -45,7 +45,11 @@ func paramsOfInterest() map[string]map[string]params {
 			"basilica":                {name: "basilica",                cReal: -0.75,          cImag:  0.0          },
 			"cantor":                  {name: "cantor dust",             cReal:  1.0,           cImag:  0.0          }, // TODO(jbunds): improve color gradients
 			"dendrite":                {name: "dendrite",                cReal:  0.0,           cImag:  1.0          },
+			// https://commons.wikimedia.org/wiki/File:Julia_set_(highres_01).jpg
+			"floyd":                   {name: "pink floyd",              cReal:  0.285,         cImag:  0.01         },
 			"golden":                  {name: "golden",                  cReal: math.Phi - 2.0, cImag: math.Phi - 1.0},
+			// https://commons.wikimedia.org/wiki/File:Julia_set_(highres_02).jpg
+			"mantis":                  {name: "praying mantis",          cReal:  0.285,         cImag:  0.013        },
 			"rabbit":                  {name: "rabbit",                  cReal: -0.122561,      cImag:  0.744862     },
 			"siegel":                  {name: "siegel disc",             cReal: -0.390541,      cImag: -0.586788     },
 			// most of these were taken from

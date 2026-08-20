@@ -125,7 +125,13 @@ func main() {
 		title       = fmt.Sprintf("%s - %s (%v, %vi)",      fractalType, displayName, params.xReal, params.yImag)
 		shaderCode += mandelbrotShaderCode
 	case "julia":
-		title       = fmt.Sprintf("%s - %s (c = %v + %vi)", fractalType, displayName, params.cReal, params.cImag)
+		displayCReal := fmt.Sprintf("%v", params.cReal) // hack to avoid using strconv
+		displayCImag := fmt.Sprintf("%v", params.cImag)
+		if params.name == "golden" {
+			displayCReal = "(φ - 2)"
+			displayCImag = "(φ - 1)"
+		}
+		title       = fmt.Sprintf("%s - %s (c = %s + %si)", fractalType, displayName, displayCReal, displayCImag)
 		shaderCode += juliaShaderCode
 	}
 

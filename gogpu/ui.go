@@ -129,12 +129,17 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 				}
 			case "julia":
 				displayCReal := fmt.Sprintf("%v", p.cReal) // hack to avoid using strconv
+				displayCImag := fmt.Sprintf("%v", p.cImag)
 				if !strings.HasPrefix(displayCReal, "-") {
 					displayCReal = " " + fmt.Sprintf("%v", p.cReal)
 				}
+				if p.name == "golden" {
+					displayCReal = "(φ - 2)"
+					displayCImag = "(φ - 1)"
+				}
 				labelEntries[fractalType][key] = labels{
-					menuItemText: fmt.Sprintf(format["menu"  ][fractalType], displayName + ":",    displayCReal, p.cImag),
-					windowTitle:  fmt.Sprintf(format["window"][fractalType], fractalType, displayName,  p.cReal, p.cImag),
+					menuItemText: fmt.Sprintf(format["menu"  ][fractalType], displayName + ":",         displayCReal, displayCImag),
+					windowTitle:  fmt.Sprintf(format["window"][fractalType], fractalType, displayName,  displayCReal, displayCImag),
 				}
 			}
 		}
