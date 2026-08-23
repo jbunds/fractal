@@ -83,7 +83,6 @@ type assets struct {
 type renderer struct {
 	fractal fractal
 	theme   string
-	maxIter func(int) float64
 	state   *state
 	gpu     *gpu
 	assets  *assets
@@ -264,7 +263,6 @@ func newRenderer(fractal fractal, theme string) *renderer {
 
 	return &renderer{
 		fractal: fractal,
-		maxIter: fractal.params.maxIter,
 		theme:   theme,
 		gpu:     new(gpu),
 		assets:  new(assets),
@@ -384,7 +382,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		r.state.yImagHi,       r.state.yImagLo,
 		r.state.cRealHi,       r.state.cRealLo,
 		r.state.cImagHi,       r.state.cImagLo,
-		r.state.viewportWidth, r.maxIter(r.state.frameCount),
+		r.state.viewportWidth, r.fractal.params.maxIter(r.state.frameCount),
 	)
 
 	err := r.gpu.device.Queue().WriteBuffer(
