@@ -1,8 +1,8 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -18,16 +18,10 @@ import (
 	"golang.org/x/text/language"
 )
 
-// labels holds strings for UI elements keyed off the params stru
-type labels struct {
-	menuItemText string
-	windowTitle  string
-}
-
 // TODO(jbunds): refactor addFractalsMenu & uiLabels (at least they're not in the hot path...)
 
 // addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
-// fractal type ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
+// fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
 // to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
 // from a preset list of named (or unnamed) parameters.
 func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func()) {
@@ -35,12 +29,12 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 	labels, sortedMenuItems := uiLabels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
 
-	for _, kind := range slices.Sorted(maps.Keys(fractals)) {
+	for _, kind := range kinds(fractals) {
 		fractalMenu := gogpu.NewMenu()
 		for _, name := range sortedMenuItems[kind] {
-			newFractal := fractals[kind][name]
+			newFractal := fractals[name]
 			label      := labels[kind][name]
-			fractalMenu.AddItem(gogpu.MenuItem{Title: label.menuItemText, Action: func() {
+			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
 				curRenderer := cr.Load().(*renderer)
 				curRenderer.release()
 				newRenderer := newRenderer(*newFractal, curRenderer.theme)
@@ -53,7 +47,7 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 				//
 				//               note that attempting to instantiate a new "primary" window here
 				//               via app.NewWindow() will crash the program
-				app.SetTitle(label.windowTitle)
+				app.SetTitle(newFractal.titleText)
 				app.RequestRedraw()
 				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
 				                           // on the "close window" icon in the primary window's title bar
@@ -71,18 +65,15 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 }
 
 // uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
-func uiLabels(fractals map[string]map[string]*fractal) (map[string]map[string]labels, map[string][]string) {
+//func uiLabels(fractals map[string]*fractal) (map[string]map[string]labels, map[string][]string) {
+func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
 	maxLen := make(map[string]int)
-	kinds  := slices.Sorted(maps.Keys(fractals))
-
-	for _, kind := range kinds {
-		for _, fractal := range fractals[kind] {
-			maxLen[kind] = max(maxLen[kind], len(normalizeName(fractal.name)))
-		}
+	for _, fractal := range fractals {
+		maxLen[fractal.kind] = max(maxLen[fractal.kind], len(normalizeName(fractal.name)))
 	}
 
 	format := map[string]map[string]string{
-		"menu": {
+		"menu": { // TODO(jbunds): encapsulate format strings in params.go
 			"mandelbrot": fmt.Sprintf("%%-%ds  %%v, %%vi", maxLen["mandelbrot"] + 1),
 			"julia":      fmt.Sprintf("%%-%ds  c = %%v + %%vi", maxLen["julia"] + 1),
 		},
@@ -92,35 +83,33 @@ func uiLabels(fractals map[string]map[string]*fractal) (map[string]map[string]la
 		},
 	}
 
-	labelEntries    := make(map[string]map[string]labels, len(fractals)) // fractal-specific formatted menu item text and window title
-	sortedMenuItems := make(map[string][]string)                       // fractal-type-specific sorted list of menu items
+	labelEntries    := make(map[string]map[string]string, len(fractals)) // fractal-specific formatted menu item text and window title
+	sortedMenuItems := make(map[string][]string)                         // fractal-kind-specific sorted list of menu items
 
-	for _, kind := range kinds{
-		labelEntries[kind] = make(map[string]labels)
-		
-		sortedMenuItemKeys := slices.SortedFunc(maps.Keys(fractals[kind]), func(a, b string) int {
-			prioA := 0; if isUnnamed(fractals[kind][a].name) { prioA = 1 }
-			prioB := 0; if isUnnamed(fractals[kind][b].name) { prioB = 1 }
+	for _, kind := range kinds(fractals) {
+		labelEntries[kind]  = make(map[string]string)
+
+		sortedFractalNames := slices.SortedFunc(fractalNamesByKind(fractals, kind), func(a, b string) int {
+			// TODO(jbunds): clean this up
+			prioA := 0; if isUnnamed(a) { prioA = 1 }
+			prioB := 0; if isUnnamed(b) { prioB = 1 }
 			if prioA != prioB { return prioA - prioB }
-			return strings.Compare(a, b)
+			return cmp.Compare(a, b)
 		})
 
-		sortedMenuItems[kind] = sortedMenuItemKeys
+		sortedMenuItems[kind] = sortedFractalNames
 
-		for _, key := range sortedMenuItemKeys {
-			fractal     := fractals[kind][key]
+		for _, name := range sortedFractalNames {
+			fractal     := fractals[name]
 			displayName := normalizeName(fractal.name)
 			
-			switch kind {
+			switch kind { // TODO(jbunds): encapsulate fractal-kind-specific UI display logic and special case handling in params.go
 			case "mandelbrot":
 				displayXReal := fmt.Sprintf("%v", fractal.params.xReal) // hack to avoid using strconv
 				if !strings.HasPrefix(displayXReal, "-") {
 					displayXReal = " " + fmt.Sprintf("%v", fractal.params.xReal)
 				}
-				labelEntries[kind][key] = labels{
-					menuItemText: fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayXReal,         fractal.params.yImag),
-					windowTitle:  fmt.Sprintf(format["window"][kind], kind, displayName, fractal.params.xReal, fractal.params.yImag),
-				}
+				labelEntries[kind][name] = fmt.Sprintf(format["menu"][kind], displayName + ":", displayXReal, fractal.params.yImag)
 			case "julia":
 				displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
 				displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
@@ -131,10 +120,7 @@ func uiLabels(fractals map[string]map[string]*fractal) (map[string]map[string]la
 					displayCReal = "(φ - 2)"
 					displayCImag = "(φ - 1)"
 				}
-				labelEntries[kind][key] = labels{
-					menuItemText: fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayCReal, displayCImag),
-					windowTitle:  fmt.Sprintf(format["window"][kind], kind, displayName, displayCReal, displayCImag),
-				}
+				labelEntries[kind][name] = fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayCReal, displayCImag)
 			}
 		}
 	}

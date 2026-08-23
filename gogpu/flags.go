@@ -27,12 +27,12 @@ func flags(fs *flag.FlagSet, args []string) (fractal, string, error) {
 		return fractal{}, "", err
 	}
 	// TODO(jbunds): refactor the 3x duplicated logic that writes user-friendly messages to os.Stderr below
-	kinds        := fractals()
-	fractals, ok := kinds[kind]
-	if !ok {
+	fractals := fractals()
+	kinds    := kinds(fractals)
+	if !slices.Contains(kinds, kind) {
 		fs.Usage()
 		fmt.Fprintf(os.Stderr, "valid values for -type:\n\n")
-		for kind := range kinds {
+		for _, kind := range kinds {
 			fmt.Fprintf(os.Stderr, "  %s\n", kind)
 		}
 		fmt.Fprintln(os.Stderr)
@@ -47,11 +47,11 @@ func flags(fs *flag.FlagSet, args []string) (fractal, string, error) {
 	if !ok {
 		fs.Usage()
 		fmt.Fprintf(os.Stderr, "valid values for -fractal:\n\n")
-		for name := range fractals {
+		for _, name := range slices.Sorted(fractalNamesByKind(fractals, kind)) {
 			fmt.Fprintf(os.Stderr, "  %s\n", name)
 		}
 		fmt.Fprintln(os.Stderr)
-		return fractal{}, "", fmt.Errorf("invalid fractal specified: %q", name)
+		return fractal{}, "", fmt.Errorf("invalid fractal identifier specified: %q", name)
 	}
 	themes := slices.Sorted(maps.Keys(colorSchemes))
 	if !slices.Contains(themes, theme) {
