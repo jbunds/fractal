@@ -1,0 +1,77 @@
+# https://golangci-lint.run/docs/configuration/file/
+# https://github.com/golangci/golangci-lint/blob/HEAD/.golangci.reference.yml
+version: "2"
+run:
+  timeout: 1m
+
+linters:
+  default: standard # https://github.com/golangci/golangci-lint/blob/60180aacaa642385a3f683875507013b43214edf/.golangci.reference.yml#L14
+  enable:
+    - asasalint                 # check for pass []any as any in variadic func(...any)
+    - bidichk                   # checks for dangerous unicode character sequences
+    - bodyclose                 # checks whether HTTP response body is closed successfully
+    - contextcheck              # check whether the function uses a non-inherited context
+    - copyloopvar               # detects places where loop variables are copied
+    - decorder                  # check declaration order and count of types, constants, variables and functions
+    - depguard                  # checks if package imports are in a list of acceptable packages
+    - fatcontext                # detects nested contexts in loops and function literals
+    - gocheckcompilerdirectives # checks that go compiler directive comments (//go:) are valid
+    - gochecknoglobals          # check that no global variables exist
+    - gochecknoinits            # checks that no init functions are present in Go code
+    - gocritic                  # provides diagnostics that check for bugs, performance and style issues
+    - godoclint                 # checks Golang's documentation practice (godoc)
+    - godot                     # check if comments end in a period
+    - gomodguard_v2             # allow and blocklist linter for direct Go module dependencies
+    - gosec                     # inspects source code for security problems
+    - gosmopolitan              # report certain i18n/l10n anti-patterns
+    - makezero                  # find slice declarations with non-zero initial length
+    - modernize                 # a suite of analyzers that suggest simplifications to Go code, using modern language and library features
+    - perfsprint                # checks that fmt.Sprintf can be replaced with a faster alternative
+    - prealloc                  # find slice declarations that could potentially be pre-allocated
+    - reassign                  # checks that package variables are not reassigned
+    - revive                    # fast, configurable, extensible, flexible, and beautiful linter
+    - thelper                   # thelper detects tests helpers which do not start with the t.Helper() method
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*github.com/gogpu/gg.Context).Fill                       # unrecoverable error
+        - (*github.com/gogpu/gg/integration/ggcanvas.Canvas).Close  # unrecoverable error
+        - (*github.com/gogpu/gg/text.FontSource).Close              # unrecoverable error
+    gosec:
+      excludes:
+        - G104  # unrecoverable errors returned by methods of the github.com/gogpu/gg* packages listed above
+    depguard:
+      rules:
+        production_whitelist:
+          list-mode: strict
+          allow:
+            - cmp
+            - embed
+            - flag
+            - fmt
+            - iter
+            - maps
+            - math
+            - math/cmplx
+            - os
+            - path/filepath
+            - slices
+            - strings
+            - sync
+            - sync/atomic
+            - time
+            - unsafe
+            - github.com/gogpu/gg
+            - github.com/gogpu/gg/gpu
+            - github.com/gogpu/gg/integration/ggcanvas
+            - github.com/gogpu/gg/text
+            - github.com/gogpu/gogpu
+            - github.com/gogpu/gpucontext
+            - github.com/gogpu/gputypes
+            - github.com/gogpu/wgpu
+            - golang.org/x/text/cases
+            - golang.org/x/text/language
+    perfsprint:
+      error-format: false
