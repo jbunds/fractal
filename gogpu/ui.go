@@ -30,60 +30,54 @@ type labels struct {
 // fractal type ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
 // to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
 // from a preset list of named (or unnamed) parameters.
-func addFractalsMenu(app *gogpu.App, cr *atomic.Value) {
-	params                  := paramsOfInterest()
-	labels, sortedMenuItems := uiLabels(params)
+func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func()) {
+	fractals                := fractals()
+	labels, sortedMenuItems := uiLabels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
 
-	for _, fractalType := range slices.Sorted(maps.Keys(params)) {
+	for _, kind := range slices.Sorted(maps.Keys(fractals)) {
 		fractalMenu := gogpu.NewMenu()
-		for _, paramsKey := range sortedMenuItems[fractalType] {
-			fractalMenu.AddItem(gogpu.MenuItem{Title: labels[fractalType][paramsKey].menuItemText, Action: func() {
-				newRenderer := newRenderer(fractalType, params[fractalType][paramsKey])
-				oldRenderer := cr.Swap(newRenderer).(*renderer)
-				oldRenderer.release()
-				shaderCode := commonShaderCode + "\n"
-				switch fractalType {
-				case "mandelbrot":
-					shaderCode += mandelbrotShaderCode
-				case "julia":
-					shaderCode += juliaShaderCode
-				}
-				newRenderer.init(app, shaderCode)
+		for _, name := range sortedMenuItems[kind] {
+			newFractal := fractals[kind][name]
+			label      := labels[kind][name]
+			fractalMenu.AddItem(gogpu.MenuItem{Title: label.menuItemText, Action: func() {
+				curRenderer := cr.Load().(*renderer)
+				curRenderer.release()
+				newRenderer := newRenderer(*newFractal, curRenderer.theme)
+				newRenderer.init(app, kind, curRenderer.theme)
+				cr.Store(newRenderer) // alternatively: cr.Swap(newRenderer).(*renderer).release() here and delete the line calling release() above
+				scheduleMenuRebuild()
 				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
 				//               icon in the window's title bar, preferably by somehow hiding the primary window
 				//               instead of actually closing it, easily facilitating its reuse here
 				//
 				//               note that attempting to instantiate a new "primary" window here
 				//               via app.NewWindow() will crash the program
-				app.SetTitle(labels[fractalType][paramsKey].windowTitle)
-				if app.PrimaryWindow() == nil {
-					panic("app.PrimaryWindow() is nil")
-				}
+				app.SetTitle(label.windowTitle)
 				app.RequestRedraw()
 				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
 				                           // on the "close window" icon in the primary window's title bar
 			}})
 		}
 		fractalsMenu.AddItem(gogpu.MenuItem{
-			Title:   cases.Title(language.English).String(fractalType),
+			Title:   cases.Title(language.English).String(kind),
 			Submenu: fractalMenu,
 		})
 	}
 
 	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
 	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("fractals", fractalsMenu)
+	app.SetCustomMenu("fractals", fractalsMenu) // either this call or the call to app.SetCustomMenu() in rebuildMenus() erroneously extends the native application menu
 }
 
 // uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
-func uiLabels(params map[string]map[string]params) (map[string]map[string]labels, map[string][]string) {
-	maxLen       := make(map[string]int)
-	fractalTypes := slices.Sorted(maps.Keys(params))
+func uiLabels(fractals map[string]map[string]*fractal) (map[string]map[string]labels, map[string][]string) {
+	maxLen := make(map[string]int)
+	kinds  := slices.Sorted(maps.Keys(fractals))
 
-	for _, fractalType := range fractalTypes {
-		for _, p := range params[fractalType] {
-			maxLen[fractalType] = max(maxLen[fractalType], len(normalizeName(p.name)))
+	for _, kind := range kinds {
+		for _, fractal := range fractals[kind] {
+			maxLen[kind] = max(maxLen[kind], len(normalizeName(fractal.name)))
 		}
 	}
 
@@ -98,48 +92,48 @@ func uiLabels(params map[string]map[string]params) (map[string]map[string]labels
 		},
 	}
 
-	labelEntries    := make(map[string]map[string]labels, len(params)) // fractal-specific formatted menu item text and window title
+	labelEntries    := make(map[string]map[string]labels, len(fractals)) // fractal-specific formatted menu item text and window title
 	sortedMenuItems := make(map[string][]string)                       // fractal-type-specific sorted list of menu items
 
-	for _, fractalType := range fractalTypes {
-		labelEntries[fractalType] = make(map[string]labels)
+	for _, kind := range kinds{
+		labelEntries[kind] = make(map[string]labels)
 		
-		sortedMenuItemKeys := slices.SortedFunc(maps.Keys(params[fractalType]), func(a, b string) int {
-			prioA := 0; if isUnnamed(params[fractalType][a].name) { prioA = 1 }
-			prioB := 0; if isUnnamed(params[fractalType][b].name) { prioB = 1 }
+		sortedMenuItemKeys := slices.SortedFunc(maps.Keys(fractals[kind]), func(a, b string) int {
+			prioA := 0; if isUnnamed(fractals[kind][a].name) { prioA = 1 }
+			prioB := 0; if isUnnamed(fractals[kind][b].name) { prioB = 1 }
 			if prioA != prioB { return prioA - prioB }
 			return strings.Compare(a, b)
 		})
 
-		sortedMenuItems[fractalType] = sortedMenuItemKeys
+		sortedMenuItems[kind] = sortedMenuItemKeys
 
 		for _, key := range sortedMenuItemKeys {
-			p           := params[fractalType][key]
-			displayName := normalizeName(p.name)
+			fractal     := fractals[kind][key]
+			displayName := normalizeName(fractal.name)
 			
-			switch fractalType {
+			switch kind {
 			case "mandelbrot":
-				displayXReal := fmt.Sprintf("%v", p.xReal) // hack to avoid using strconv
+				displayXReal := fmt.Sprintf("%v", fractal.params.xReal) // hack to avoid using strconv
 				if !strings.HasPrefix(displayXReal, "-") {
-					displayXReal = " " + fmt.Sprintf("%v", p.xReal)
+					displayXReal = " " + fmt.Sprintf("%v", fractal.params.xReal)
 				}
-				labelEntries[fractalType][key] = labels{
-					menuItemText: fmt.Sprintf(format["menu"  ][fractalType], displayName + ":",    displayXReal, p.yImag),
-					windowTitle:  fmt.Sprintf(format["window"][fractalType], fractalType, displayName,  p.xReal, p.yImag),
+				labelEntries[kind][key] = labels{
+					menuItemText: fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayXReal,         fractal.params.yImag),
+					windowTitle:  fmt.Sprintf(format["window"][kind], kind, displayName, fractal.params.xReal, fractal.params.yImag),
 				}
 			case "julia":
-				displayCReal := fmt.Sprintf("%v", p.cReal) // hack to avoid using strconv
-				displayCImag := fmt.Sprintf("%v", p.cImag)
+				displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
+				displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
 				if !strings.HasPrefix(displayCReal, "-") {
-					displayCReal = " " + fmt.Sprintf("%v", p.cReal)
+					displayCReal = " " + fmt.Sprintf("%v", fractal.params.cReal)
 				}
-				if p.name == "golden" {
+				if fractal.name == "golden" {
 					displayCReal = "(φ - 2)"
 					displayCImag = "(φ - 1)"
 				}
-				labelEntries[fractalType][key] = labels{
-					menuItemText: fmt.Sprintf(format["menu"  ][fractalType], displayName + ":",         displayCReal, displayCImag),
-					windowTitle:  fmt.Sprintf(format["window"][fractalType], fractalType, displayName,  displayCReal, displayCImag),
+				labelEntries[kind][key] = labels{
+					menuItemText: fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayCReal, displayCImag),
+					windowTitle:  fmt.Sprintf(format["window"][kind], kind, displayName, displayCReal, displayCImag),
 				}
 			}
 		}
@@ -198,7 +192,9 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 //		})
 
 	aboutWin.SetOnClose(func() bool {
-//		app.PrimaryWindow().Show() // properly handle the primary window losing focus
+// properly handle the primary window losing focus:
+//   https://pkg.go.dev/github.com/gogpu/ui/widget#ContextImpl.RequestFocus
+//		app.PrimaryWindow().Show()
 		if release != nil {
 			release()
 		}

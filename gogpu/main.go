@@ -7,8 +7,8 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,8 +42,8 @@ const (
 	paletteSize           = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
 	viewportWidth         = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
 	scaleFactor           = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
-	linearGrowthFactor    = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive frame when rendering Mandelbrot fractals
-	quadraticGrowthFactor = 0.003 // multiplicative factor by which boundary calculation iterations increase per the square of the frame count when rendering Julia fractals
+	linearGrowthFactor    = 0.3   // multiplicative factor by which boundary calculation iterations increase per each successive Mandelbrot fractal frame
+	quadraticGrowthFactor = 0.003 // multiplicative factor by which boundary calculation iterations increase per the square of the Julia fractal frame count
 	maxPrecisionFrames    = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
@@ -81,11 +81,12 @@ type assets struct {
 
 // renderer stores most runtime state.
 type renderer struct {
-	maxIter  func(int) float64
-	powScale uint32
-	state    *state
-	gpu      *gpu
-	assets   *assets
+	fractal fractal
+	theme   string
+	maxIter func(int) float64
+	state   *state
+	gpu     *gpu
+	assets  *assets
 }
 
 // uniforms stores per-frame uniforms.
@@ -99,69 +100,65 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 
 func main() {
 	var (
-		initTokenOnce   sync.Once
-		lastFrameTime   time.Time
-		animToken       atomic.Pointer[gogpu.AnimationToken]
-		currentRenderer atomic.Value
+		initTokenOnce      sync.Once
+		lastFrameTime      time.Time
+		animToken          atomic.Pointer[gogpu.AnimationToken]
+		currentRenderer    atomic.Value
+		pendingMenuRebuild bool
 	)
 
-	fractalType, params, err := flags(flag.CommandLine, os.Args[1:])
+	fractal, theme, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
 		os.Exit(1)
 	}
 
-	displayName := params.name
-	if strings.ContainsAny(string(params.name[0]), "+-0") { // hack to avoid using regexp
-		displayName = "unnamed"
-	}
-
-	var title string
-
-	shaderCode := commonShaderCode + "\n"
-
-	switch fractalType {
-	case "mandelbrot":
-		title       = fmt.Sprintf("%s - %s (%v, %vi)",      fractalType, displayName, params.xReal, params.yImag)
-		shaderCode += mandelbrotShaderCode
-	case "julia":
-		displayCReal := fmt.Sprintf("%v", params.cReal) // hack to avoid using strconv
-		displayCImag := fmt.Sprintf("%v", params.cImag)
-		if params.name == "golden" {
-			displayCReal = "(φ - 2)"
-			displayCImag = "(φ - 1)"
-		}
-		title       = fmt.Sprintf("%s - %s (c = %s + %si)", fractalType, displayName, displayCReal, displayCImag)
-		shaderCode += juliaShaderCode
-	}
-
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Fractal").
-		WithTitle(title).
+		WithTitle(fractal.titleText).
 		WithSize(mainWidth, mainHeight).
 		WithResizable(false))
 
 	app.SetQuitOnLastWindowClosed(false)
 
-	currentRenderer.Store(newRenderer(fractalType, params))
+	// closures (singletons)
 
+	currentRenderer.Store(newRenderer(fractal, theme))
+
+	scheduleMenuRebuild := func() { // TODO(jbunds): move scheduleMenuRebuild into ui.go
+		pendingMenuRebuild = true
+	}
+
+	rebuildMenus := func() { // TODO(jbunds): move rebuildMenus into ui.go
+		themesMenu := gogpu.NewMenuWithTitle("Themes")
+		for cs := range maps.Keys(colorSchemes) { // maybe sort these so they're listed in a consistent order
+			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): disable the current theme
+				cr := currentRenderer.Load().(*renderer)
+				if cr.theme == cs { return }
+				newRenderer := newRenderer(cr.fractal, cs)
+				newRenderer.init(app, cr.fractal.kind, cs)
+				oldRenderer := currentRenderer.Swap(newRenderer).(*renderer)
+				oldRenderer.release()
+				app.RequestRedraw()
+			}})
+		}
+		// either this call or the call to app.SetCustomMenu() in addFractalsMenu() erroneously extends the native application menu
+		app.SetCustomMenu("themes", themesMenu)
+	}
 
 	// GoGPU callback registrations and definitions
 
+	var primaryWindow *gogpu.Window
+
 	app.OnSurfaceAvailable(func() {
+		primaryWindow = app.PrimaryWindow()
 
-		// TODO(jbunds): handle case where use clicks the "close window" icon in the far-left of the primary window's title bar
-
-		// will crash the program
-		//primWin := app.PrimaryWindow()
-		//primWin.SetOnClose(func() bool {
-		//	primWin.Hide()
-		//	return false
-		//})
-
-		// nasty, heavy-handed workaround: refuse to allow users to close the primary window
-		// the primary window can still be hidden via ⌘+w
-		app.PrimaryWindow().SetOnClose(func() bool { return false })
+		// heavy-handed workaround: preclude users closing the primary window via the "close window"
+		// icon in the title bar (i.e., the red circle on macOS; can still be hidden via ⌘+w)
+		primaryWindow.SetOnClose(func() bool {
+			// primaryWindow.Hide() // will crash the program
+			return false
+		})
 
 		aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
 			WithTitle(""). // looks more slick and modern when combined with the transparent title bar triggered via WithHeaderAlignment(gogpu.HeaderAlignLeft) below
@@ -175,14 +172,16 @@ func main() {
 		aboutWin.Hide()
 
 		cr := currentRenderer.Load().(*renderer)
-		cr.init(app, shaderCode)
+		cr.init(app, cr.fractal.kind, cr.theme)
 
 		// when appendAboutMenuItem is called before addFractalsMenu, duplicate items are added to the main application menu
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetCustomMenu() in addFratcalsMenu() ?
-		addFractalsMenu(app, &currentRenderer)
+		addFractalsMenu(app, &currentRenderer, scheduleMenuRebuild)
+
+		rebuildMenus()
 
 		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
 		appendAboutMenuItem(app, &currentRenderer, aboutWin)
@@ -209,20 +208,27 @@ func main() {
 				if animToken.Load() != nil {
 					animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
 				}
-				app.PrimaryWindow().Hide()
+				primaryWindow.Hide()
 			}
 		case key == gpucontext.KeySpace:
 			toggleAnimation(app, &animToken)
 		}
 	})
 
+	app.OnUpdate(func(_ float64) {
+		if pendingMenuRebuild {
+			rebuildMenus()
+			pendingMenuRebuild = false
+		}
+	})
+
 	app.OnDraw(func(dc *gogpu.Context) {
-		r := currentRenderer.Load().(*renderer)
-		r.draw(dc, &animToken)
+		cr := currentRenderer.Load().(*renderer)
+		cr.draw(dc, &animToken)
 
 		elapsed := time.Since(lastFrameTime).Milliseconds()
 		if elapsed > 0 {
-			r.state.fps = float64(1000.0 / elapsed)
+			cr.state.fps = float64(1000.0 / elapsed)
 		}
 		lastFrameTime = time.Now()
 
@@ -250,44 +256,19 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(fractalType string, params params) *renderer {
-	xRealHi, xRealLo := splitFloat64(params.xReal)
-	yImagHi, yImagLo := splitFloat64(params.yImag)
-	cRealHi, cRealLo := splitFloat64(params.cReal)
-	cImagHi, cImagLo := splitFloat64(params.cImag)
-	var powScale uint32
-	// TODO(jbunds): fix leaky abstraction
-	if params.name == "basilica"      ||
-	   params.name == "cantor dust"   ||
-	   params.name == "dendrite"      ||
-	   params.name == "rabbit"        ||
-	   params.name == "siegel disc"   ||
-	   params.name == "+0.37 + 0.16i" ||
-	   params.name == "+0.40 + 0.10i" ||
-	   params.name == "-0.50 - 0.56i" ||
-	   params.name == "-1.50 + 0.00i" {
-		powScale = 1
-	}
-
-	var maxIter func(int) float64
-
-	switch fractalType {
-	case "mandelbrot":
-		maxIter = func(frameCount int) float64 {
-			return float64(baseIterations) + float64(frameCount) * linearGrowthFactor
-		}
-	case "julia":
-		maxIter = func(frameCount int) float64 {
-			return float64(baseIterations) + (float64(frameCount * frameCount) * quadraticGrowthFactor)
-		}
-	}
+func newRenderer(fractal fractal, theme string) *renderer {
+	xRealHi, xRealLo := splitFloat64(fractal.params.xReal)
+	yImagHi, yImagLo := splitFloat64(fractal.params.yImag)
+	cRealHi, cRealLo := splitFloat64(fractal.params.cReal)
+	cImagHi, cImagLo := splitFloat64(fractal.params.cImag)
 
 	return &renderer{
-		powScale: powScale,
-		maxIter:  maxIter,
-		gpu:      new(gpu),
-		assets:   new(assets),
-		state:    &state{
+		fractal: fractal,
+		maxIter: fractal.params.maxIter,
+		theme:   theme,
+		gpu:     new(gpu),
+		assets:  new(assets),
+		state:   &state{
 			frameCount:    0,
 			viewportWidth: viewportWidth,
 			xRealHi:       xRealHi,
@@ -303,38 +284,43 @@ func newRenderer(fractalType string, params params) *renderer {
 }
 
 // init initializes all resources required to render frames in the main application window.
-func (r *renderer) init(app *gogpu.App, shaderCode string) {
+func (r *renderer) init(app *gogpu.App, kind, theme string) {
 	// TODO(jbunds): cache / memoize all runtime-invariant resources,
 	//               e.g., color palette and associated downstream gogpu objects
 	var err error
-	r.assets.fontSource, err = loadFontSource()
+	r.assets.fontSource, err = loadFontSource() // invariant
 	if err != nil {
 		panic(err)
 	}
-	r.gpu.device = app.DeviceProvider().Device()
+	r.gpu.device = app.DeviceProvider().Device() // invariant
+
+	shaderCode := map[string]string{
+		"mandelbrot": commonShaderCode + "\n" + mandelbrotShaderCode,
+		"julia":      commonShaderCode + "\n" + juliaShaderCode,
+	}
 
 	paletteColors,
 		paletteTex,
 		uniformBuf,
 		bgLayout0,
 		bgLayout1,
-		pipeline := initResources(r.gpu.device, shaderCode)
+		pipeline := initResources(r.gpu.device, theme, shaderCode[kind]) // not invariant (?)
 
-	r.state.paletteColors = paletteColors
-	r.gpu.paletteTex      = paletteTex
-	r.gpu.uniformBuf      = uniformBuf
-	r.gpu.bgLayout0       = bgLayout0
-	r.gpu.bgLayout1       = bgLayout1
-	r.gpu.pipeline        = pipeline
+	r.state.paletteColors = paletteColors // invariant
+	r.gpu.paletteTex      = paletteTex    // invariant
+	r.gpu.uniformBuf      = uniformBuf    // not invariant (?)
+	r.gpu.bgLayout0       = bgLayout0     // invariant
+	r.gpu.bgLayout1       = bgLayout1     // ?
+	r.gpu.pipeline        = pipeline      // invariant (?)
 
-	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), mainWidth, mainHeight)
+	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), mainWidth, mainHeight) // invariant
 	if err != nil {
 		panic(err)
 	}
 
-	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12))
+	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12)) // invariant
 
-	r.assets.paletteView, err = r.gpu.device.CreateTextureView(r.gpu.paletteTex, &wgpu.TextureViewDescriptor{
+	r.assets.paletteView, err = r.gpu.device.CreateTextureView(r.gpu.paletteTex, &wgpu.TextureViewDescriptor{ // invariant
 		Format:    gputypes.TextureFormatR32Uint,
 		Dimension: gputypes.TextureViewDimension1D,
 	})
@@ -393,7 +379,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	r.state.frameCount++
 
 	unis := updateUniforms( // magnification logic
-		r.state.frameCount,    r.powScale,
+		r.state.frameCount,    r.fractal.params.powScale,
 		r.state.xRealHi,       r.state.xRealLo,
 		r.state.yImagHi,       r.state.yImagLo,
 		r.state.cRealHi,       r.state.cRealLo,
@@ -488,12 +474,6 @@ func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
 
 // release marks resources for deallocation.
 func (r *renderer) release() {
-
-	// TODO(jbunds): experiment with TrackResource:
-	//
-	//   https://pkg.go.dev/github.com/gogpu/gogpu#readme-resource-management
-	//   https://pkg.go.dev/github.com/gogpu/gogpu#App.TrackResource
-
 	if r.assets.fractalViewRelease != nil {
 		r.assets.fractalViewRelease()
 	}

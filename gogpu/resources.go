@@ -7,9 +7,36 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+// colorScheme defines five RGB colors used to generate cosine-smoothed color gradients.
+type colorScheme struct {
+	c1r, c1g, c1b float64
+	c2r, c2g, c2b float64
+	c3r, c3g, c3b float64
+	c4r, c4g, c4b float64
+	c5r, c5g, c5b float64
+}
+
+var colorSchemes = map[string]colorScheme {
+	"green": colorScheme{
+		c1r:  25.0, c1g:  30.0, c1b:  28.0,
+		c2r: 105.0, c2g: 125.0, c2b: 100.0,
+		c3r: 215.0, c3g: 135.0, c3b:  30.0,
+		c4r: 245.0, c4g: 200.0, c4b:  35.0,
+		c5r: 245.0, c5g: 240.0, c5b: 225.0,
+	},
+	"red": colorScheme{
+		c1r:  40.0, c1g:   5.0, c1b:   5.0,
+		c2r: 180.0, c2g:  20.0, c2b:  10.0,
+		c3r: 255.0, c3g:  80.0, c3b:  10.0,
+		c4r: 255.0, c4g: 200.0, c4b:  40.0,
+		c5r: 255.0, c5g: 255.0, c5b: 245.0,
+	},
+}
+
 // initResources initializes all resources consumed by the GPU shader.
 func initResources(
 	device     *wgpu.Device,
+	theme,
 	shaderCode string,
 ) (
 	[]uint32,
@@ -24,7 +51,7 @@ func initResources(
 		panic(err)
 	}
 
-	paletteColors, paletteTex := initPaletteTex(device)
+	paletteColors, paletteTex := initPaletteTex(device, theme)
 	uniformBuf                := initUniformBuf(device)
 	bgLayout0, bgLayout1      := initBindGroupLayouts(device)
 	layout                    := initPipelineLayout(device, bgLayout0, bgLayout1)
@@ -33,48 +60,47 @@ func initResources(
 	return paletteColors, paletteTex, uniformBuf, bgLayout0, bgLayout1, pipeline
 }
 
-// initPalette initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
-func initPalette() []uint32 {
-	colors        := make([]uint32, paletteSize)
-	c1r, c1g, c1b :=  25.0,  30.0,  28.0
-	c2r, c2g, c2b := 105.0, 125.0, 100.0
-	c3r, c3g, c3b := 215.0, 135.0,  30.0
-	c4r, c4g, c4b := 245.0, 200.0,  35.0
-	c5r, c5g, c5b := 245.0, 240.0, 225.0
+// initPaletteGreen initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
+func initPalette(theme string) []uint32 {
+	colors := make([]uint32, paletteSize)
+	cs     := colorSchemes[theme]
+
 	for i := range colors {
 		t    := float64(i) / float64(paletteSize)
 		tAdj := 0.5 - 0.5 * math.Cos(t * 2.0 * math.Pi)
+
 		var r, g, b float64
+
 		switch {
 		case tAdj < 0.25:
 			p := tAdj / 0.25
-			r  = c1r + (c2r - c1r) * p
-			g  = c1g + (c2g - c1g) * p
-			b  = c1b + (c2b - c1b) * p
+			r  = cs.c1r + (cs.c2r - cs.c1r) * p
+			g  = cs.c1g + (cs.c2g - cs.c1g) * p
+			b  = cs.c1b + (cs.c2b - cs.c1b) * p
 		case tAdj < 0.50:
 			p := (tAdj - 0.25) / 0.25
-			r  = c2r + (c3r - c2r) * p
-			g  = c2g + (c3g - c2g) * p
-			b  = c2b + (c3b - c2b) * p
+			r  = cs.c2r + (cs.c3r - cs.c2r) * p
+			g  = cs.c2g + (cs.c3g - cs.c2g) * p
+			b  = cs.c2b + (cs.c3b - cs.c2b) * p
 		case tAdj < 0.75:
 			p := (tAdj - 0.50) / 0.25
-			r  = c3r + (c4r - c3r) * p
-			g  = c3g + (c4g - c3g) * p
-			b  = c3b + (c4b - c3b) * p
+			r  = cs.c3r + (cs.c4r - cs.c3r) * p
+			g  = cs.c3g + (cs.c4g - cs.c3g) * p
+			b  = cs.c3b + (cs.c4b - cs.c3b) * p
 		default:
 			p := (tAdj - 0.75) / 0.25
-			r  = c4r + (c5r - c4r) * p
-			g  = c4g + (c5g - c4g) * p
-			b  = c4b + (c5b - c4b) * p
+			r  = cs.c4r + (cs.c5r - cs.c4r) * p
+			g  = cs.c4g + (cs.c5g - cs.c4g) * p
+			b  = cs.c4b + (cs.c5b - cs.c4b) * p
 		}
 		colors[i] = uint32(r) | (uint32(g) << 8) | (uint32(b) << 16) | (255 << 24)
 	}
 	return colors
 }
 
-// initPaletteBuf initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
-func initPaletteTex(device *wgpu.Device) ([]uint32, *wgpu.Texture) {
-	paletteColors   := initPalette()
+// initPaletteTex initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
+func initPaletteTex(device *wgpu.Device, theme string) ([]uint32, *wgpu.Texture) {
+	paletteColors   := initPalette(theme)
 	paletteTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Size:          wgpu.Extent3D{Width: paletteSize, Height: 1, DepthOrArrayLayers: 1},
 		SampleCount:   1,
