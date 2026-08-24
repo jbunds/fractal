@@ -16,4 +16,4 @@ repos:
         language:       system
         types:          [go]
         pass_filenames: false
-        args:           [run, --verbose, gogpu/...]
+        args:           [run, --verbose, gogpu/...]  # requires a go.work file where the last line is "use ./gogpu"
