@@ -53,7 +53,7 @@ func flags(fs *flag.FlagSet, args []string) (fractal, string, error) {
 		fmt.Fprintln(os.Stderr)
 		return fractal{}, "", fmt.Errorf("invalid fractal identifier specified: %q", name)
 	}
-	themes := slices.Sorted(maps.Keys(colorSchemes))
+	themes := slices.Sorted(maps.Keys(colorSchemes()))
 	if !slices.Contains(themes, theme) {
 		fs.Usage()
 		fmt.Fprintf(os.Stderr, "valid values for -theme:\n\n")

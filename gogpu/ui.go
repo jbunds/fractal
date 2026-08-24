@@ -65,7 +65,6 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 }
 
 // uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
-//func uiLabels(fractals map[string]*fractal) (map[string]map[string]labels, map[string][]string) {
 func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
 	maxLen := make(map[string]int)
 	for _, fractal := range fractals {

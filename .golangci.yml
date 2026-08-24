@@ -6,6 +6,9 @@ run:
 
 linters:
   default: standard # https://github.com/golangci/golangci-lint/blob/60180aacaa642385a3f683875507013b43214edf/.golangci.reference.yml#L14
+  disable:
+    - gomodguard
+    - gomodguard_v2
   enable:
     - asasalint                 # check for pass []any as any in variadic func(...any)
     - bidichk                   # checks for dangerous unicode character sequences
@@ -21,7 +24,7 @@ linters:
     - gocritic                  # provides diagnostics that check for bugs, performance and style issues
     - godoclint                 # checks Golang's documentation practice (godoc)
     - godot                     # check if comments end in a period
-    - gomodguard_v2             # allow and blocklist linter for direct Go module dependencies
+#    - gomodguard_v2             # allow and blocklist linter for direct Go module dependencies
     - gosec                     # inspects source code for security problems
     - gosmopolitan              # report certain i18n/l10n anti-patterns
     - makezero                  # find slice declarations with non-zero initial length

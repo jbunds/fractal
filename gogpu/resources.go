@@ -16,21 +16,23 @@ type colorScheme struct {
 	c5r, c5g, c5b float64
 }
 
-var colorSchemes = map[string]colorScheme {
-	"green": colorScheme{
-		c1r:  25.0, c1g:  30.0, c1b:  28.0,
-		c2r: 105.0, c2g: 125.0, c2b: 100.0,
-		c3r: 215.0, c3g: 135.0, c3b:  30.0,
-		c4r: 245.0, c4g: 200.0, c4b:  35.0,
-		c5r: 245.0, c5g: 240.0, c5b: 225.0,
-	},
-	"red": colorScheme{
-		c1r:  40.0, c1g:   5.0, c1b:   5.0,
-		c2r: 180.0, c2g:  20.0, c2b:  10.0,
-		c3r: 255.0, c3g:  80.0, c3b:  10.0,
-		c4r: 255.0, c4g: 200.0, c4b:  40.0,
-		c5r: 255.0, c5g: 255.0, c5b: 245.0,
-	},
+func colorSchemes() map[string]colorScheme {
+	return map[string]colorScheme{
+		"green": colorScheme{
+			c1r:  25.0, c1g:  30.0, c1b:  28.0,
+			c2r: 105.0, c2g: 125.0, c2b: 100.0,
+			c3r: 215.0, c3g: 135.0, c3b:  30.0,
+			c4r: 245.0, c4g: 200.0, c4b:  35.0,
+			c5r: 245.0, c5g: 240.0, c5b: 225.0,
+		},
+		"red": colorScheme{
+			c1r:  40.0, c1g:   5.0, c1b:   5.0,
+			c2r: 180.0, c2g:  20.0, c2b:  10.0,
+			c3r: 255.0, c3g:  80.0, c3b:  10.0,
+			c4r: 255.0, c4g: 200.0, c4b:  40.0,
+			c5r: 255.0, c5g: 255.0, c5b: 245.0,
+		},
+	}
 }
 
 // initResources initializes all resources consumed by the GPU shader.
@@ -63,7 +65,7 @@ func initResources(
 // initPaletteGreen initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
 func initPalette(theme string) []uint32 {
 	colors := make([]uint32, paletteSize)
-	cs     := colorSchemes[theme]
+	cs     := colorSchemes()[theme]
 
 	for i := range colors {
 		t    := float64(i) / float64(paletteSize)

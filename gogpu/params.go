@@ -229,7 +229,6 @@ func kinds(fractals map[string]*fractal) []string {
 }
 
 // fractalNamesByKind returns an iterator over all fractal names of the specified kind.
-// (suitable for use in slices.SortedFunc)
 func fractalNamesByKind(fractals map[string]*fractal, kind string) iter.Seq[string] { // TODO(jbunds): clean up this and uiLabels
 	return func(yield func(string) bool) {
 		for name, fractal := range fractals {

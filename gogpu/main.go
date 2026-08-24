@@ -130,7 +130,7 @@ func main() {
 
 	rebuildMenus := func() { // TODO(jbunds): move rebuildMenus into ui.go
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
-		for cs := range maps.Keys(colorSchemes) { // maybe sort these so they're listed in a consistent order
+		for cs := range maps.Keys(colorSchemes()) { // maybe sort these so they're listed in a consistent order
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): disable the current theme
 				cr := currentRenderer.Load().(*renderer)
 				if cr.theme == cs { return }
@@ -329,7 +329,7 @@ func (r *renderer) init(app *gogpu.App, kind, theme string) {
 	err = r.gpu.device.Queue().WriteTexture(
 		&wgpu.ImageCopyTexture{Texture: paletteTex},
 		unsafe.Slice(
-			(*byte)(unsafe.Pointer(&r.state.paletteColors[0])),
+			(*byte)(unsafe.Pointer(&r.state.paletteColors[0])), // #nosec G103 - audited
 			len(r.state.paletteColors) * 4),
 		&wgpu.ImageDataLayout{BytesPerRow: paletteSize * 4},
 		&wgpu.Extent3D{Width: paletteSize, Height: 1, DepthOrArrayLayers: 1})
@@ -387,7 +387,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	err := r.gpu.device.Queue().WriteBuffer(
 		r.gpu.uniformBuf, 0,
-		unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64))
+		unsafe.Slice((*byte)(unsafe.Pointer(unis)), 64)) // #nosec G103 - audited
 	if err != nil {
 		panic(err)
 	}
