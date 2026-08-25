@@ -18,7 +18,7 @@ import (
 	"golang.org/x/text/language"
 )
 
-// TODO(jbunds): refactor addFractalsMenu & uiLabels (at least they're not in the hot path...)
+// TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
 
 // addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
 // fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
@@ -26,7 +26,7 @@ import (
 // from a preset list of named (or unnamed) parameters.
 func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
 	fractals                := fractals()
-	labels, sortedMenuItems := uiLabels(fractals)
+	labels, sortedMenuItems := labels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
 
 	for _, kind := range kinds(fractals) {
@@ -64,8 +64,8 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 	app.SetCustomMenu("fractals", fractalsMenu) // either this call or the call to app.SetCustomMenu() in rebuildMenus() erroneously extends the native application menu
 }
 
-// uiLabels creates formatted and sorted lists of labels for UI elements as maps keyed off the given "params" struct.
-func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
+// labels creates formatted and sorted lists of labels for UI elements as maps keyed off the given map.
+func labels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
 	maxLen := make(map[string]int)
 	for _, fractal := range fractals {
 		maxLen[fractal.kind] = max(maxLen[fractal.kind], len(normalizeName(fractal.name)))

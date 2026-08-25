@@ -86,7 +86,7 @@ func TestFlags(t *testing.T) {
 			"",
 			"valid values for -fractal:",
 			"",
-			"  -0.088, 0.6555",
+			"  -0.088, 0.6555i",
 			"  -0.7436447860, 0.1318252536i",
 			"  -0.74364990, 0.13188204i",
 			"  elephant",

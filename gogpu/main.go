@@ -325,6 +325,27 @@ func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 func (r *renderer) init(app *gogpu.App, theme string) {
 	// TODO(jbunds): consider using a sync.Map-based main-global (singleton) cache to cache all static resources
 	//               (arguably overkill as the overhead of reinstantiating static resources is not a bottleneck)
+	//
+	//	func getOrInit[T any](r *renderer, key string, load func() (T, error)) T {
+	//		if val, ok := r.cache.Load(key); ok {
+	//			return val.(T)
+	//		}
+	//		onceKey := key + ":_once"
+	//		val, _  := r.cache.LoadOrStore(onceKey, new(sync.Once))
+	//		once    := val.(*sync.Once)
+	//		var result T
+	//		var onceErr error
+	//		once.Do(func() {
+	//			result, onceErr = load()
+	//			if onceErr != nil { panic(onceErr) }
+	//			r.cache.Store(key, result)
+	//			r.cache.Delete(onceKey)
+	//		})
+	//		val, ok := r.cache.Load(key)
+	//		if !ok { panic("cache invariant broken: value not stored") }
+	//		return val.(T)
+	//	}
+
 	var err error
 	r.assets.fontSource, err = loadFontSource(os.DirFS("/").(fs.StatFS))
 	if err != nil {

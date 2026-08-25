@@ -59,9 +59,9 @@ func fractals() map[string]*fractal {
 			kind:   "mandelbrot",
 			name:   "wolfgang beyer",
 			params: &parameters{xReal: -0.7436438885706, yImag: 0.1318259043124}},
-		"-0.088, 0.6555": {
+		"-0.088, 0.6555i": {
 			kind:   "mandelbrot",
-			name:   "-0.088, 0.6555",
+			name:   "-0.088, 0.6555i",
 			params: &parameters{xReal: -0.088, yImag: 0.6555}},
 		// high-quality deep-zoom images uploaded by https://commons.wikimedia.org/wiki/User:Wolfgangbeyer
 		// https://en.wikipedia.org/wiki/File:Mandel_zoom_05_tail_part.jpg
@@ -229,7 +229,7 @@ func kinds(fractals map[string]*fractal) []string {
 }
 
 // fractalNamesByKind returns an iterator over all fractal names of the specified kind.
-func fractalNamesByKind(fractals map[string]*fractal, kind string) iter.Seq[string] { // TODO(jbunds): clean up this and uiLabels
+func fractalNamesByKind(fractals map[string]*fractal, kind string) iter.Seq[string] { // TODO(jbunds): clean up this and labels in ui.go
 	return func(yield func(string) bool) {
 		for name, fractal := range fractals {
 			if fractal.kind == kind {
