@@ -27,12 +27,13 @@ func cmpOpts() cmp.Options {
 func TestNewRenderer(t *testing.T) {
 	t.Parallel()
 	want := &renderer{
+		theme:  "bar",
 		fractal: &fractal{params: &parameters{}},
-		theme:  "foo",
-		state:  &state{viewportWidth: 3},
-		gpu:    &gpu{},
-		assets: &assets{}}
-	got := newRenderer(&fractal{params: &parameters{}}, "foo")
+		gpu:     &gpu{shaderCode: "foo"},
+		state:   &state{viewportWidth: 3},
+		assets:  &assets{},
+	}
+	got := newRenderer(&fractal{params: &parameters{}}, "foo", "bar")
 	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
 		t.Errorf("newRenderer() mismatch (-want +got):\n%s", diff)
 	}

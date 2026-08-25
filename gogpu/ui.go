@@ -24,7 +24,7 @@ import (
 // fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
 // to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
 // from a preset list of named (or unnamed) parameters.
-func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func()) {
+func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
 	fractals                := fractals()
 	labels, sortedMenuItems := uiLabels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
@@ -36,10 +36,10 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 			label      := labels[kind][name]
 			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
 				curRenderer := cr.Load().(*renderer)
-				curRenderer.release()
-				newRenderer := newRenderer(newFractal, curRenderer.theme)
-				newRenderer.init(app, kind, curRenderer.theme)
-				cr.Store(newRenderer) // alternatively: cr.Swap(newRenderer).(*renderer).release() here and delete the line calling release() above
+				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
+				newRenderer.init(app, curRenderer.theme)
+				oldRenderer := cr.Swap(newRenderer).(*renderer)
+				oldRenderer.release()
 				scheduleMenuRebuild()
 				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
 				//               icon in the window's title bar, preferably by somehow hiding the primary window

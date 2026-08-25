@@ -60,6 +60,7 @@ linters:
             - math/cmplx
             - os
             - path/filepath
+            - regexp
             - slices
             - strings
             - sync

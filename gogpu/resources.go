@@ -37,9 +37,8 @@ func colorSchemes() map[string]colorScheme {
 
 // initResources initializes all resources consumed by the GPU shader.
 func initResources(
-	device     *wgpu.Device,
-	theme,
-	shaderCode string,
+	device            *wgpu.Device,
+	shaderCode, theme string,
 ) (
 	[]uint32,
 	*wgpu.Texture,

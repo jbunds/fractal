@@ -7,9 +7,11 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"maps"
 	"io/fs"
+	"maps"
 	"os"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,6 +71,7 @@ type gpu struct {
 	bgLayout0       *wgpu.BindGroupLayout // uniforms and color palette layout
 	bgLayout1       *wgpu.BindGroupLayout // storage texture layout
 	pipeline        *wgpu.ComputePipeline // GPU compute pipeline configuration
+	shaderCode      string                // WGSL shader code (specific to fractal kind: Mandelbrot or Julia)
 }
 
 // assets stores assets used to render frames (canvas, font, texture view).
@@ -121,9 +124,19 @@ func main() {
 
 	app.SetQuitOnLastWindowClosed(false)
 
+	removeComments := func(text string) string {
+		re := regexp.MustCompile(`(?m)^\s*//.*\n`)
+		return strings.TrimSpace(re.ReplaceAllString(text, ""))
+	}
+
+	shaderCode := map[string]string{
+		"mandelbrot": removeComments(commonShaderCode + "\n" + mandelbrotShaderCode),
+		"julia":      removeComments(commonShaderCode + "\n" + juliaShaderCode),
+	}
+
 	// closures (singletons)
 
-	currentRenderer.Store(newRenderer(fractal, theme))
+	currentRenderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
 
 	scheduleMenuRebuild := func() { // TODO(jbunds): move scheduleMenuRebuild into ui.go
 		pendingMenuRebuild = true
@@ -135,8 +148,8 @@ func main() {
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): disable the current theme
 				cr := currentRenderer.Load().(*renderer)
 				if cr.theme == cs { return }
-				newRenderer := newRenderer(cr.fractal, cs)
-				newRenderer.init(app, cr.fractal.kind, cs)
+				newRenderer := newRenderer(cr.fractal, shaderCode[cr.fractal.kind], cs)
+				newRenderer.init(app, cs)
 				oldRenderer := currentRenderer.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
 				app.RequestRedraw()
@@ -172,14 +185,14 @@ func main() {
 		aboutWin.Hide()
 
 		cr := currentRenderer.Load().(*renderer)
-		cr.init(app, cr.fractal.kind, cr.theme)
+		cr.init(app, cr.theme)
 
 		// when appendAboutMenuItem is called before addFractalsMenu, duplicate items are added to the main application menu
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetCustomMenu() in addFratcalsMenu() ?
-		addFractalsMenu(app, &currentRenderer, scheduleMenuRebuild)
+		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
 
 		rebuildMenus()
 
@@ -256,7 +269,7 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(fractal *fractal, theme string) *renderer {
+func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 	xRealHi, xRealLo := splitFloat64(fractal.params.xReal)
 	yImagHi, yImagLo := splitFloat64(fractal.params.yImag)
 	cRealHi, cRealLo := splitFloat64(fractal.params.cReal)
@@ -265,8 +278,8 @@ func newRenderer(fractal *fractal, theme string) *renderer {
 	return &renderer{
 		fractal: fractal,
 		theme:   theme,
-		gpu:     new(gpu),
-		assets:  new(assets),
+		gpu:     &gpu{shaderCode: shaderCode},
+		assets:  &assets{},
 		state:   &state{
 			frameCount:    0,
 			viewportWidth: viewportWidth,
@@ -283,43 +296,32 @@ func newRenderer(fractal *fractal, theme string) *renderer {
 }
 
 // init initializes all resources required to render frames in the main application window.
-func (r *renderer) init(app *gogpu.App, kind, theme string) {
-	// TODO(jbunds): cache / memoize all runtime-invariant resources,
-	//               e.g., color palette and associated downstream gogpu objects
+func (r *renderer) init(app *gogpu.App, theme string) {
+	// TODO(jbunds): consider using a sync.Map-based main-global (singleton) cache to cache all static resources
+	//               (arguably overkill as the overhead of reinstantiating static resources is not a bottleneck)
 	var err error
-	r.assets.fontSource, err = loadFontSource(os.DirFS("/").(fs.StatFS)) // invariant
-	if err != nil {
-		panic(err)
-	}
-	r.gpu.device = app.DeviceProvider().Device() // invariant
-
-	shaderCode := map[string]string{
-		"mandelbrot": commonShaderCode + "\n" + mandelbrotShaderCode,
-		"julia":      commonShaderCode + "\n" + juliaShaderCode,
-	}
-
-	paletteColors,
-		paletteTex,
-		uniformBuf,
-		bgLayout0,
-		bgLayout1,
-		pipeline := initResources(r.gpu.device, theme, shaderCode[kind]) // not invariant (?)
-
-	r.state.paletteColors = paletteColors // invariant
-	r.gpu.paletteTex      = paletteTex    // invariant
-	r.gpu.uniformBuf      = uniformBuf    // not invariant (?)
-	r.gpu.bgLayout0       = bgLayout0     // invariant
-	r.gpu.bgLayout1       = bgLayout1     // ?
-	r.gpu.pipeline        = pipeline      // invariant (?)
-
-	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), mainWidth, mainHeight) // invariant
+	r.assets.fontSource, err = loadFontSource(os.DirFS("/").(fs.StatFS))
 	if err != nil {
 		panic(err)
 	}
 
-	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12)) // invariant
+	r.gpu.device = app.DeviceProvider().Device()
 
-	r.assets.paletteView, err = r.gpu.device.CreateTextureView(r.gpu.paletteTex, &wgpu.TextureViewDescriptor{ // invariant
+	r.state.paletteColors,
+	r.gpu.paletteTex,
+	r.gpu.uniformBuf,
+	r.gpu.bgLayout0,
+	r.gpu.bgLayout1,
+	r.gpu.pipeline = initResources(r.gpu.device, r.gpu.shaderCode, theme)
+
+	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), mainWidth, mainHeight)
+	if err != nil {
+		panic(err)
+	}
+
+	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12))
+
+	r.assets.paletteView, err = r.gpu.device.CreateTextureView(r.gpu.paletteTex, &wgpu.TextureViewDescriptor{
 		Format:    gputypes.TextureFormatR32Uint,
 		Dimension: gputypes.TextureViewDimension1D,
 	})
@@ -328,7 +330,7 @@ func (r *renderer) init(app *gogpu.App, kind, theme string) {
 	}
 
 	err = r.gpu.device.Queue().WriteTexture(
-		&wgpu.ImageCopyTexture{Texture: paletteTex},
+		&wgpu.ImageCopyTexture{Texture: r.gpu.paletteTex},
 		unsafe.Slice(
 			(*byte)(unsafe.Pointer(&r.state.paletteColors[0])), // #nosec G103 - audited
 			len(r.state.paletteColors) * 4),
@@ -473,9 +475,7 @@ func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
 
 // release marks resources for deallocation.
 func (r *renderer) release() {
-	if r.assets.fractalViewRelease != nil {
-		r.assets.fractalViewRelease()
-	}
+	r.assets.fractalViewRelease()
 	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
 	r.assets.paletteView.Release()
