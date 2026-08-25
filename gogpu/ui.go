@@ -71,15 +71,9 @@ func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[s
 		maxLen[fractal.kind] = max(maxLen[fractal.kind], len(normalizeName(fractal.name)))
 	}
 
-	format := map[string]map[string]string{
-		"menu": { // TODO(jbunds): encapsulate format strings in params.go
-			"mandelbrot": fmt.Sprintf("%%-%ds  %%v, %%vi", maxLen["mandelbrot"] + 1),
-			"julia":      fmt.Sprintf("%%-%ds  c = %%v + %%vi", maxLen["julia"] + 1),
-		},
-		"window": {
-			"mandelbrot": "%s - %s (%v, %vi)",
-			"julia":      "%s - %s (c = %v + %vi)",
-		},
+	format := map[string]string{ // TODO(jbunds): encapsulate format strings in params.go
+		"mandelbrot": fmt.Sprintf("%%-%ds  %%v, %%vi", maxLen["mandelbrot"] + 1),
+		"julia":      fmt.Sprintf("%%-%ds  c = %%v + %%vi", maxLen["julia"] + 1),
 	}
 
 	labelEntries    := make(map[string]map[string]string, len(fractals)) // fractal-specific formatted menu item text and window title
@@ -108,7 +102,7 @@ func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[s
 				if !strings.HasPrefix(displayXReal, "-") {
 					displayXReal = " " + fmt.Sprintf("%v", fractal.params.xReal)
 				}
-				labelEntries[kind][name] = fmt.Sprintf(format["menu"][kind], displayName + ":", displayXReal, fractal.params.yImag)
+				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayXReal, fractal.params.yImag)
 			case "julia":
 				displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
 				displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
@@ -119,7 +113,7 @@ func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[s
 					displayCReal = "(φ - 2)"
 					displayCImag = "(φ - 1)"
 				}
-				labelEntries[kind][name] = fmt.Sprintf(format["menu"  ][kind], displayName + ":", displayCReal, displayCImag)
+				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayCReal, displayCImag)
 			}
 		}
 	}
