@@ -525,7 +525,6 @@ func updateUniforms(
 // toggleAnimation toggles between pausing and resuming the animation loop,
 // e.g., when the spacebar is pressed, or when the primary window is hidden.
 func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]) {
-	// TODO(jbunds): fix the bug where animation is not actually toggled when the "About Fractal" window has focus
 	if oldToken := token.Swap(nil); oldToken != nil {
 		oldToken.Stop()
 	} else {

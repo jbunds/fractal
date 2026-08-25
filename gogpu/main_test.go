@@ -11,12 +11,8 @@ import (
 func cmpOpts() cmp.Options {
 	return cmp.Options{
 		cmp.AllowUnexported(
-			renderer{},
-			fractal{},
-			parameters{},
-			state{},
-			gpu{},
-			assets{},
+			assets{},     fractal{},  gpu{},
+			parameters{}, renderer{}, state{}, uniforms{},
 		),
 		cmpopts.IgnoreUnexported(
 			gpucontext.TextureView{},
@@ -39,5 +35,23 @@ func TestNewRenderer(t *testing.T) {
 	got := newRenderer(&fractal{params: &parameters{}}, "foo")
 	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
 		t.Errorf("newRenderer() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestUpdateUniforms(t *testing.T) {
+	t.Parallel()
+	want := &uniforms{
+		paletteSize: 2000,
+		width:        800, height:   800,
+		frameCount:     1, powScale:   2,
+		xRealHi:        3, xRealLo:    4,
+		yImagHi:        5, yImagLo:    6,
+		cRealHi:        7, cRealLo:    8,
+		cImagHi:        9, cImagLo:   10,
+		scaleHi:       11, maxIter:   12,
+	}
+	got  := updateUniforms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
+		t.Errorf("updateUniforms() mismatch (-want +got):\n%s", diff)
 	}
 }
