@@ -47,10 +47,13 @@ linters:
         production_whitelist:
           list-mode: strict
           allow:
+            - bytes
             - cmp
             - embed
             - flag
             - fmt
+            - image/color
+            - io/fs
             - iter
             - maps
             - math
@@ -61,6 +64,7 @@ linters:
             - strings
             - sync
             - sync/atomic
+            - testing
             - time
             - unsafe
             - github.com/gogpu/gg
@@ -71,6 +75,7 @@ linters:
             - github.com/gogpu/gpucontext
             - github.com/gogpu/gputypes
             - github.com/gogpu/wgpu
+            - github.com/google/go-cmp/cmp
             - golang.org/x/text/cases
             - golang.org/x/text/language
     perfsprint:

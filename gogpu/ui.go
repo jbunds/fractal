@@ -37,7 +37,7 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, scheduleMenuRebuild func(
 			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
 				curRenderer := cr.Load().(*renderer)
 				curRenderer.release()
-				newRenderer := newRenderer(*newFractal, curRenderer.theme)
+				newRenderer := newRenderer(newFractal, curRenderer.theme)
 				newRenderer.init(app, kind, curRenderer.theme)
 				cr.Store(newRenderer) // alternatively: cr.Swap(newRenderer).(*renderer).release() here and delete the line calling release() above
 				scheduleMenuRebuild()
@@ -115,7 +115,7 @@ func uiLabels(fractals map[string]*fractal) (map[string]map[string]string, map[s
 				if !strings.HasPrefix(displayCReal, "-") {
 					displayCReal = " " + fmt.Sprintf("%v", fractal.params.cReal)
 				}
-				if fractal.name == "golden" {
+				if fractal.name == "golden" { // special handling for φ since it's irrational
 					displayCReal = "(φ - 2)"
 					displayCImag = "(φ - 1)"
 				}
@@ -295,5 +295,6 @@ func normalizeName(name string) string {
 
 // isUnnamed returns true if the parameter has no associated canonical name.
 func isUnnamed(name string) bool {
-	return strings.HasPrefix(name, "+") || strings.HasPrefix(name, "-")
+	return strings.HasPrefix(name, "+") ||
+	       strings.HasPrefix(name, "-")
 }

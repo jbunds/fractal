@@ -8,6 +8,7 @@ require (
 	github.com/gogpu/gpucontext v0.28.0
 	github.com/gogpu/gputypes v0.5.2
 	github.com/gogpu/wgpu v0.31.6
+	github.com/google/go-cmp v0.7.0
 	golang.org/x/text v0.41.0
 )
 

@@ -53,16 +53,22 @@ func initResources(
 		panic(err)
 	}
 
-	paletteColors, paletteTex := initPaletteTex(device, theme)
-	uniformBuf                := initUniformBuf(device)
-	bgLayout0, bgLayout1      := initBindGroupLayouts(device)
-	layout                    := initPipelineLayout(device, bgLayout0, bgLayout1)
-	pipeline                  := initPipeline(device, layout, shader)
+	paletteColors        := initPalette(theme)
+	paletteTex           := initPaletteTex(device)
+	uniformBuf           := initUniformBuf(device)
+	bgLayout0, bgLayout1 := initBindGroupLayouts(device)
+	layout               := initPipelineLayout(device, bgLayout0, bgLayout1)
+	pipeline             := initPipeline(device, layout, shader)
 
-	return paletteColors, paletteTex, uniformBuf, bgLayout0, bgLayout1, pipeline
+	return paletteColors,
+	       paletteTex,
+	       uniformBuf,
+	       bgLayout0,
+	       bgLayout1,
+	       pipeline
 }
 
-// initPaletteGreen initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
+// initPalette initializes the pre-computed color palette used by the GPU shader to render colored pixels on the canvas.
 func initPalette(theme string) []uint32 {
 	colors := make([]uint32, paletteSize)
 	cs     := colorSchemes()[theme]
@@ -101,8 +107,7 @@ func initPalette(theme string) []uint32 {
 }
 
 // initPaletteTex initializes the pre-computed color palette and corresponding buffer passed to the GPU shader.
-func initPaletteTex(device *wgpu.Device, theme string) ([]uint32, *wgpu.Texture) {
-	paletteColors   := initPalette(theme)
+func initPaletteTex(device *wgpu.Device) (*wgpu.Texture) {
 	paletteTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Size:          wgpu.Extent3D{Width: paletteSize, Height: 1, DepthOrArrayLayers: 1},
 		SampleCount:   1,
@@ -114,7 +119,7 @@ func initPaletteTex(device *wgpu.Device, theme string) ([]uint32, *wgpu.Texture)
 	if err != nil {
 		panic(err)
 	}
-	return paletteColors, paletteTex
+	return paletteTex
 }
 
 // initUniformBuf initializes the uniform buffer used to pass uniforms to the GPU shader.

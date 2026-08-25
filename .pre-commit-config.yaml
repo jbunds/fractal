@@ -17,3 +17,12 @@ repos:
         types:          [go]
         pass_filenames: false
         args:           [run, --verbose, gogpu/...]  # requires a go.work file where the last line is "use ./gogpu"
+  - repo: local
+    hooks:
+      - id:             go-test
+        name:           go test
+        entry:          go test -v -race ./gogpu/...
+        files:          \.go$|^go\.(?:mod|sum)$
+        language:       system
+        pass_filenames: false
+        require_serial: true

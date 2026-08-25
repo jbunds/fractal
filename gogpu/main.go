@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"maps"
+	"io/fs"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -81,8 +82,8 @@ type assets struct {
 
 // renderer stores most runtime state.
 type renderer struct {
-	fractal fractal
 	theme   string
+	fractal *fractal
 	state   *state
 	gpu     *gpu
 	assets  *assets
@@ -255,7 +256,7 @@ func main() {
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
-func newRenderer(fractal fractal, theme string) *renderer {
+func newRenderer(fractal *fractal, theme string) *renderer {
 	xRealHi, xRealLo := splitFloat64(fractal.params.xReal)
 	yImagHi, yImagLo := splitFloat64(fractal.params.yImag)
 	cRealHi, cRealLo := splitFloat64(fractal.params.cReal)
@@ -286,7 +287,7 @@ func (r *renderer) init(app *gogpu.App, kind, theme string) {
 	// TODO(jbunds): cache / memoize all runtime-invariant resources,
 	//               e.g., color palette and associated downstream gogpu objects
 	var err error
-	r.assets.fontSource, err = loadFontSource() // invariant
+	r.assets.fontSource, err = loadFontSource(os.DirFS("/").(fs.StatFS)) // invariant
 	if err != nil {
 		panic(err)
 	}
