@@ -49,12 +49,14 @@ linters:
           allow:
             - bytes
             - cmp
+            - context
             - embed
             - flag
             - fmt
             - image/color
             - io/fs
             - iter
+            - log/slog
             - maps
             - math
             - math/cmplx
@@ -62,6 +64,7 @@ linters:
             - path/filepath
             - regexp
             - slices
+            - strconv
             - strings
             - sync
             - sync/atomic
@@ -77,6 +80,7 @@ linters:
             - github.com/gogpu/gputypes
             - github.com/gogpu/wgpu
             - github.com/google/go-cmp/cmp
+            - github.com/jbunds/progress
             - golang.org/x/text/cases
             - golang.org/x/text/language
     perfsprint:

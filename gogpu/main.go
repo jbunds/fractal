@@ -4,13 +4,16 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +28,7 @@ import (
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/jbunds/progress"
 )
 
 //go:embed common.wgsl
@@ -116,6 +120,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// workaround for none of the following working as expected:
+	//
+	//   gogpu.SetLogger(nil)
+	//   gogpu.SetLogger(slog.New(slog.DiscardHandler))
+	//   gogpu.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Fractal").
 		WithTitle(fractal.titleText).
@@ -129,12 +140,12 @@ func main() {
 		return strings.TrimSpace(re.ReplaceAllString(text, ""))
 	}
 
+	// closures (singletons)
+
 	shaderCode := map[string]string{
 		"mandelbrot": removeComments(commonShaderCode + "\n" + mandelbrotShaderCode),
 		"julia":      removeComments(commonShaderCode + "\n" + juliaShaderCode),
 	}
-
-	// closures (singletons)
 
 	currentRenderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
 
@@ -158,6 +169,15 @@ func main() {
 		// either this call or the call to app.SetCustomMenu() in addFractalsMenu() erroneously extends the native application menu
 		app.SetCustomMenu("themes", themesMenu)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	prog := progress.New(ctx, maxPrecisionFrames, os.Stderr,
+		progress.WithTracker(progress.Fraction),
+		progress.WithTheme("magma"),
+		progress.WithPersistBar(true),
+	)
+	defer prog.Close()
 
 	// GoGPU callback registrations and definitions
 
@@ -249,14 +269,20 @@ func main() {
 			animToken.Store(app.StartAnimation())
 		})
 
+		if cr.state.frameCount <= maxPrecisionFrames {
+			prog.Report(1, strconv.Itoa(cr.state.frameCount))
+		} else {
+			prog.Close()
+		}
+
 		if animToken.Load() != nil {
 			app.RequestRedraw() // renders at VSync frequency (~60 FPS)
 		}
-
 	})
 
 	app.OnClose(func() {
 		currentRenderer.Load().(*renderer).release()
+		cancel()
 	})
 
 	lastFrameTime = time.Now()
@@ -370,7 +396,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 			t.Stop()
 		}
 		r.release()
-		fmt.Println("stopped rendering (precision exhausted)")
+		// fmt.Println("stopped rendering (precision exhausted)")
 		return
 	}
 
