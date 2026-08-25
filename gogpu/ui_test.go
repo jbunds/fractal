@@ -15,7 +15,7 @@ func TestLabels(t *testing.T) {
 		wantMenuItems map[string][]string
 	}{
 		{
-			name:     "succeeds",
+			name:     "validate formatting, special handling of golden, and unnamed fractal menu items are listed last",
 			fractals: map[string]*fractal{
 				"foo": &fractal{
 					kind:   "mandelbrot",
