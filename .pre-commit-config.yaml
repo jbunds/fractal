@@ -25,4 +25,3 @@ repos:
         files:          \.go$|^go\.(?:mod|sum)$
         language:       system
         pass_filenames: false
-        require_serial: true
