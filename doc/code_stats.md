@@ -9,7 +9,7 @@ see also [COCOMO][cocomo] on Wikpedia
 
 ```
 $ date
-Tue Aug 25 16:24:14 CEST 2026
+Thu Aug 27 20:39:37 CEST 2026
 ```
 
 ```
@@ -17,18 +17,18 @@ $ scc --exclude-dir .git --include-ext go,wgsl --dryness --by-file --wide
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 Language                    Files        Lines     Blanks   Comments         Code Complexity Complexity/Lines
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Go                             11        1,885        184        162        1,539        180            11.70
-(ULOC)                                   1,197
+Go                             11        1,995        190        188        1,617        187            11.56
+(ULOC)                                   1,277
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-main.go                                    540         83         44          413         56            13.56
+main.go                                    587         87         70          430         58            13.49
 ui.go                                      294         36         72          186         27            14.52
 params.go                                  242         11         22          209         16             7.66
-flags_test.go                              217          4          0          213         16             7.51
+flags_test.go                              213          4          0          209         16             7.66
 resources.go                               196         17          8          171         16             9.36
+ui_test.go                                 137          5          0          132         11             8.33
 flags.go                                    80          3          3           74         16            21.62
-fonts_test.go                               73          9          3           61         10            16.39
-ui_test.go                                  64          4          0           60          6            10.00
-resources_test.go                           62          4          0           58          4             6.90
+fonts_test.go                               70         10          3           57         10            17.54
+resources_test.go                           59          4          0           55          4             7.27
 fonts.go                                    59          8         10           41          7            17.07
 main_test.go                                58          5          0           53          6            11.32
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -39,14 +39,14 @@ common.wgsl                                 73         11         15           4
 julia.wgsl                                  61         15          0           46          8            17.39
 mandelbrot.wgsl                             56         14          0           42          7            16.67
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Total                          14        2,075        224        177        1,674        195            11.65
+Total                          14        2,185        230        203        1,752        202            11.53
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Unique Lines of Code (ULOC)              1,308
-DRYness %                                 0.63
+Unique Lines of Code (ULOC)              1,388
+DRYness %                                 0.64
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $46,407
-Estimated Schedule Effort (organic) 4.28 months
-Estimated People Required (organic) 0.96
-Processed 65,256 bytes, 0.065 megabytes (SI)
+Estimated Cost to Develop (organic) $48,680
+Estimated Schedule Effort (organic) 4.36 months
+Estimated People Required (organic) 0.99
+Processed 68,387 bytes, 0.068 megabytes (SI)
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
