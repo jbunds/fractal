@@ -99,6 +99,7 @@ func TestIsUnnamed(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := isUnnamed(tt.identifier)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("isUnnamed(%q) mismatch (-want +got):\n%s", tt.identifier, diff)
@@ -128,6 +129,7 @@ func TestNormalizeName(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := normalizeName(tt.identifier)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("normalizeName(%q) mismatch (-want +got):\n%s", tt.identifier, diff)
