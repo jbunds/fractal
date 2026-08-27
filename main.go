@@ -1,4 +1,4 @@
-// Package fractal/gogpu iteratively renders and magnifies fractals of the Mandelbrot or filled Julia set.
+// Package fractal iteratively renders and magnifies fractals of the Mandelbrot or filled Julia set.
 //
 // Tested on a MacBook Air M1.
 package main

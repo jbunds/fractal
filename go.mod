@@ -1,4 +1,4 @@
-module fractal/gogpu
+module fractal
 
 go 1.26.2
 
