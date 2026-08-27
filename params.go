@@ -194,7 +194,7 @@ func setTitles(fractals map[string]*fractal) {
 		case "julia":
 			displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
 			displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
-			if fractal.name == "golden" { // special handle "golden" since φ is irrational, hence its decimal representation is long
+			if fractal.name == "golden" { // special handle "golden", since φ is irrational, hence its decimal representation is infinite
 				displayCReal = "(φ - 2)"
 				displayCImag = "(φ - 1)"
 			}

@@ -109,7 +109,7 @@ func labels(fractals map[string]*fractal) (map[string]map[string]string, map[str
 				if !strings.HasPrefix(displayCReal, "-") {
 					displayCReal = " " + fmt.Sprintf("%v", fractal.params.cReal)
 				}
-				if fractal.name == "golden" { // special handling for φ since it's irrational
+				if fractal.name == "golden" { // special handle "golden", since φ is irrational, hence its decimal representation is infinite
 					displayCReal = "(φ - 2)"
 					displayCImag = "(φ - 1)"
 				}
