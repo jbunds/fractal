@@ -10,9 +10,9 @@ import (
 
 // adapted from https://github.com/gogpu/gg/blob/main/examples/gogpu_integration/main.go
 
-// loadFontSource finds a system font and returns the font source.
-func loadFontSource(fsys fs.StatFS) (*text.FontSource, error) {
-	path, err := findSystemFont(fsys)
+// loadFont finds a font on the host system and returns the font source.
+func loadFont(fsys fs.StatFS) (*text.FontSource, error) {
+	path, err := findFont(fsys)
 	if err != nil {
 		return nil, err
 	}
@@ -25,9 +25,9 @@ func loadFontSource(fsys fs.StatFS) (*text.FontSource, error) {
 	return source, nil
 }
 
-// findSystemFont returns the path to a TTF font found on the system.
-func findSystemFont(fsys fs.StatFS) (string, error) {
-	for _, path := range candidateFonts() {
+// findFont returns the path to a TTF font found on the host system.
+func findFont(fsys fs.StatFS) (string, error) {
+	for _, path := range fonts() {
 		// https://pkg.go.dev/io/fs#hdr-Path_Names
 		//
 		//   Paths must not start or end with a slash: “/x” and “x/” are invalid.
@@ -35,11 +35,11 @@ func findSystemFont(fsys fs.StatFS) (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("no system font found")
+	return "", fmt.Errorf("no font found")
 }
 
-// candidateFonts returns a slice of paths to commonly-installed TTF fonts.
-func candidateFonts() []string {
+// fonts returns a slice of paths to commonly-installed TTF fonts.
+func fonts() []string {
 	return []string{ // halfhearted attempt at portability
 		// macOS
 		"/System/Library/Fonts/Supplemental/Verdana.ttf",

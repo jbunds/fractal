@@ -21,7 +21,7 @@ func (m mockFS) Stat(path string) (fs.FileInfo, error) {
 	return fs.Stat(m.MapFS, strings.TrimPrefix(path, "/"))
 }
 
-func TestFindSystemFont(t *testing.T) {
+func TestFindFont(t *testing.T) {
 	t.Parallel()
 	tests := []struct{
 		name    string
@@ -48,22 +48,22 @@ func TestFindSystemFont(t *testing.T) {
 				absPathFS = fstest.MapFS{ strings.TrimPrefix(tt.path, "/"): {} }
 			}
 			mfs      := &mockFS{MapFS: absPathFS}
-			got, err := findSystemFont(mfs)
+			got, err := findFont(mfs)
 
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("findSystemFont() = %v; wantErr = %t", err, tt.wantErr)
+				t.Fatalf("findFont() = %v; wantErr = %t", err, tt.wantErr)
 			}
 
 			if tt.wantErr { return }
 
-			paths := candidateFonts()
+			paths := fonts()
 			if !slices.Contains(paths, got) {
-				t.Errorf("findSystemFont() = %q; expected one of %+v\n", got, paths)
+				t.Errorf("findFont() = %q; expected one of %+v\n", got, paths)
 			}
 
 			want := tt.path
 			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("findSystemFont() mismatch (-want +got):\n%s", diff)
+				t.Errorf("findFont() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

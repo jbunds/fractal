@@ -236,6 +236,8 @@ func main() {
 			case gpucontext.KeyQ: // ⌘+q
 				currentRenderer.Load().(*renderer).release()
 				gg.CloseAccelerator()
+				prog.Close()
+				cancel()
 				app.Quit()
 			case gpucontext.KeyW: // ⌘+w
 				if animToken.Load() != nil {
@@ -347,7 +349,7 @@ func (r *renderer) init(app *gogpu.App, theme string) {
 	//	}
 
 	var err error
-	r.assets.fontSource, err = loadFontSource(os.DirFS("/").(fs.StatFS))
+	r.assets.fontSource, err = loadFont(os.DirFS("/").(fs.StatFS))
 	if err != nil {
 		panic(err)
 	}
