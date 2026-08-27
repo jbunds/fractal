@@ -3,7 +3,7 @@ module fractal
 go 1.26.7
 
 require (
-	github.com/gogpu/gg v0.52.3
+	github.com/gogpu/gg v0.52.5
 	github.com/gogpu/gogpu v0.53.0
 	github.com/gogpu/gpucontext v0.28.0
 	github.com/gogpu/gputypes v0.5.2
