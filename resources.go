@@ -73,29 +73,29 @@ func initPalette(theme string) []uint32 {
 	cs     := colorSchemes()[theme]
 
 	for i := range colors {
-		t    := float64(i) / float64(paletteSize)
-		tAdj := 0.5 - 0.5 * math.Cos(t * 2.0 * math.Pi)
+		u       := float64(i) / float64(paletteSize)
+		uSmooth := 0.5 - 0.5 * math.Cos(u * 2.0 * math.Pi)
 
 		var r, g, b float64
 
 		switch {
-		case tAdj < 0.25:
-			p := tAdj / 0.25
+		case uSmooth < 0.25:
+			p := uSmooth / 0.25
 			r  = cs.c1r + (cs.c2r - cs.c1r) * p
 			g  = cs.c1g + (cs.c2g - cs.c1g) * p
 			b  = cs.c1b + (cs.c2b - cs.c1b) * p
-		case tAdj < 0.50:
-			p := (tAdj - 0.25) / 0.25
+		case uSmooth < 0.50:
+			p := (uSmooth - 0.25) / 0.25
 			r  = cs.c2r + (cs.c3r - cs.c2r) * p
 			g  = cs.c2g + (cs.c3g - cs.c2g) * p
 			b  = cs.c2b + (cs.c3b - cs.c2b) * p
-		case tAdj < 0.75:
-			p := (tAdj - 0.50) / 0.25
+		case uSmooth < 0.75:
+			p := (uSmooth - 0.50) / 0.25
 			r  = cs.c3r + (cs.c4r - cs.c3r) * p
 			g  = cs.c3g + (cs.c4g - cs.c3g) * p
 			b  = cs.c3b + (cs.c4b - cs.c3b) * p
 		default:
-			p := (tAdj - 0.75) / 0.25
+			p := (uSmooth - 0.75) / 0.25
 			r  = cs.c4r + (cs.c5r - cs.c4r) * p
 			g  = cs.c4g + (cs.c5g - cs.c4g) * p
 			b  = cs.c4b + (cs.c5b - cs.c4b) * p
