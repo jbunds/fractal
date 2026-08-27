@@ -13,60 +13,58 @@ func TestLabels(t *testing.T) {
 		fractals      map[string]*fractal
 		wantEntries   map[string]map[string]string
 		wantMenuItems map[string][]string
-	}{
-		{
-			name:     "validate formatting, special handling of golden, and unnamed fractal menu items are listed last",
-			fractals: map[string]*fractal{
-				"foo": &fractal{
-					kind:   "mandelbrot",
-					name:   "foo",
-					params: &parameters{xReal: -2, yImag: 1},
-				},
-				"bar": &fractal{
-					kind:   "mandelbrot",
-					name:   "bar",
-					params: &parameters{xReal: -1, yImag: 2},
-				},
-				"+1, -1i": &fractal{
-					kind:   "mandelbrot",
-					name:   "+1, -1",
-					params: &parameters{xReal: 1, yImag: -1},
-				},
-				"golden": &fractal{
-					kind:   "julia",
-					name:   "golden",
-					params: &parameters{cReal: 2, cImag: -2},
-				},
-				"-1 + 1i": &fractal{
-					kind:   "julia",
-					name:   "-1 + 1i",
-					params: &parameters{cReal: -1, cImag: 1},
-				},
+	}{{
+		name:     "validate formatting, special handling of golden, and unnamed fractal menu items are listed last",
+		fractals: map[string]*fractal{
+			"foo": &fractal{
+				kind:   "mandelbrot",
+				name:   "foo",
+				params: &parameters{xReal: -2, yImag: 1},
 			},
-			wantEntries:   map[string]map[string]string{
-				"mandelbrot": {
-					"bar":     "bar:      -1, 2i",
-					"foo":     "foo:      -2, 1i",
-					"+1, -1i": "unnamed:   1, -1i",
-				},
-				"julia":      {
-					"golden":  "golden:   c = (φ - 2) + (φ - 1)i",
-					"-1 + 1i": "unnamed:  c = -1 + 1i",
-				},
+			"bar": &fractal{
+				kind:   "mandelbrot",
+				name:   "bar",
+				params: &parameters{xReal: -1, yImag: 2},
 			},
-			wantMenuItems: map[string][]string{
-				"mandelbrot": []string{
-					"bar",
-					"foo",
-					"+1, -1i",
-				},
-				"julia":      []string{
-					"golden",
-					"-1 + 1i",
-				},
+			"+1, -1i": &fractal{
+				kind:   "mandelbrot",
+				name:   "+1, -1",
+				params: &parameters{xReal: 1, yImag: -1},
+			},
+			"golden": &fractal{
+				kind:   "julia",
+				name:   "golden",
+				params: &parameters{cReal: 2, cImag: -2},
+			},
+			"-1 + 1i": &fractal{
+				kind:   "julia",
+				name:   "-1 + 1i",
+				params: &parameters{cReal: -1, cImag: 1},
 			},
 		},
-	}
+		wantEntries:   map[string]map[string]string{
+			"mandelbrot": {
+				"bar":     "bar:      -1, 2i",
+				"foo":     "foo:      -2, 1i",
+				"+1, -1i": "unnamed:   1, -1i",
+			},
+			"julia":      {
+				"golden":  "golden:   c = (φ - 2) + (φ - 1)i",
+				"-1 + 1i": "unnamed:  c = -1 + 1i",
+			},
+		},
+		wantMenuItems: map[string][]string{
+			"mandelbrot": []string{
+				"bar",
+				"foo",
+				"+1, -1i",
+			},
+			"julia":      []string{
+				"golden",
+				"-1 + 1i",
+			},
+		},
+	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

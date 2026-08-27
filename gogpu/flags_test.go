@@ -188,23 +188,19 @@ func TestFilterArgs(t *testing.T) {
 		name string
 		args []string
 		want []string
-	}{
-		{
-			name: "no extra args",
-			args: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz"},
-			want: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz"},
-		},
-		{
-			name: "extra args",
-			args: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz", "--", "boo", "hoo"},
-			want: []string{"boo", "hoo"},
-		},
-		{
-			name: "invalid args",
-			args: []string{"foo", "bar", "--", "baz", "boo"},
-			want: []string{"baz", "boo"},
-		},
-	}
+	}{{
+		name: "no extra args",
+		args: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz"},
+		want: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz"},
+	}, {
+		name: "extra args",
+		args: []string{"-type", "foo", "-fractal", "bar", "-theme", "baz", "--", "boo", "hoo"},
+		want: []string{"boo", "hoo"},
+	}, {
+		name: "invalid args",
+		args: []string{"foo", "bar", "--", "baz", "boo"},
+		want: []string{"baz", "boo"},
+	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

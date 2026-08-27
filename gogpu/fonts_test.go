@@ -28,19 +28,17 @@ func TestFindSystemFont(t *testing.T) {
 		path    string  
 		want    string
 		wantErr bool
-	}{
-		{
-			name:    "included in list of expected fonts",
-			path:    "/System/Library/Fonts/SFNS.ttf", // must match one of the hard-coded paths in candidateFonts()
-		}, {
-			name:    "excluded from list of expected fonts",
-			path:    "/not/included/in/the/list",
-			wantErr: true,
-		}, {
-			name:    "no expected fonts found",
-			wantErr: true,
-		},
-	}
+	}{{
+		name:    "included in list of expected fonts",
+		path:    "/System/Library/Fonts/SFNS.ttf", // must match one of the hard-coded paths in candidateFonts()
+	}, {
+		name:    "excluded from list of expected fonts",
+		path:    "/not/included/in/the/list",
+		wantErr: true,
+	}, {
+		name:    "no expected fonts found",
+		wantErr: true,
+	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -55,9 +53,8 @@ func TestFindSystemFont(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("findSystemFont() = %v; wantErr = %t", err, tt.wantErr)
 			}
-			if tt.wantErr {
-				return
-			}
+
+			if tt.wantErr { return }
 
 			paths := candidateFonts()
 			if !slices.Contains(paths, got) {

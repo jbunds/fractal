@@ -23,26 +23,23 @@ func TestInitPalette(t *testing.T) {
 		name  string
 		theme string
 		want  []color.RGBA
-	}{
-		{
-			name:  "green",
-			theme: "green",
-			want:  []color.RGBA{
-				{R:  25, G:  30, B:  28, A: 255},
-				{R: 245, G: 240, B: 225, A: 255},
-				{R:  25, G:  30, B:  28, A: 255},
-			},
+	}{{
+		name:  "green",
+		theme: "green",
+		want:  []color.RGBA{
+			{R:  25, G:  30, B:  28, A: 255},
+			{R: 245, G: 240, B: 225, A: 255},
+			{R:  25, G:  30, B:  28, A: 255},
 		},
-		{
-			name:  "red",
-			theme: "red",
-			want:  []color.RGBA{
-				{R:  40, G:   5, B:   5, A: 255},
-				{R: 255, G: 255, B: 245, A: 255},
-				{R:  40, G:   5, B:   5, A: 255},
-			},
+	}, {
+		name:  "red",
+		theme: "red",
+		want:  []color.RGBA{
+			{R:  40, G:   5, B:   5, A: 255},
+			{R: 255, G: 255, B: 245, A: 255},
+			{R:  40, G:   5, B:   5, A: 255},
 		},
-	}
+	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
