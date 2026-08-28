@@ -44,16 +44,17 @@ linters:
         - G104  # unrecoverable errors returned by methods of the github.com/gogpu/gg* packages listed above
     depguard:
       rules:
-        production_whitelist:
+        prod_whitelist:
           list-mode: strict
+          files:
+            - "$all"    # all *.go files
+            - "!$test"  # exclude *_test.go files
           allow:
-            - bytes
             - cmp
             - context
             - embed
             - flag
             - fmt
-            - image/color
             - io/fs
             - iter
             - log/slog
@@ -68,7 +69,6 @@ linters:
             - strings
             - sync
             - sync/atomic
-            - testing
             - time
             - unsafe
             - github.com/gogpu/gg
@@ -79,9 +79,22 @@ linters:
             - github.com/gogpu/gpucontext
             - github.com/gogpu/gputypes
             - github.com/gogpu/wgpu
-            - github.com/google/go-cmp/cmp
             - github.com/jbunds/progress
             - golang.org/x/text/cases
             - golang.org/x/text/language
+        test_whitelist:
+          list-mode: strict
+          files:
+            - "$test"
+          allow:
+            - bytes
+            - flag
+            - image/color
+            - io/fs
+            - slices
+            - strings
+            - testing
+            - github.com/gogpu/gpucontext
+            - github.com/google/go-cmp/cmp
     perfsprint:
       error-format: false
