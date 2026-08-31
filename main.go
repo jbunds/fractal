@@ -155,7 +155,7 @@ func main() {
 
 	rebuildMenus := func() { // TODO(jbunds): move rebuildMenus into ui.go
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
-		for cs := range maps.Keys(colorSchemes()) { // maybe sort these so they're listed in a consistent order
+		for cs := range maps.Keys(colorSchemes()) {
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): disable the current theme
 				cr := currentRenderer.Load().(*renderer)
 				if cr.theme == cs { return }
@@ -166,7 +166,6 @@ func main() {
 				app.RequestRedraw()
 			}})
 		}
-		// either this call or the call to app.SetCustomMenu() in addFractalsMenu() erroneously extends the native application menu
 		app.SetCustomMenu("themes", themesMenu)
 	}
 
@@ -194,7 +193,7 @@ func main() {
 		})
 
 		aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
-			WithTitle(""). // looks more slick and modern when combined with the transparent title bar triggered via WithHeaderAlignment(gogpu.HeaderAlignLeft) below
+			WithTitle("").
 			WithSize(aboutWidth, aboutHeight).
 			WithTransparent(true).
 			WithResizable(false).
@@ -207,26 +206,17 @@ func main() {
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app, cr.theme)
 
-		// when appendAboutMenuItem is called before addFractalsMenu, duplicate items are added to the main application menu
+		setCustomAppMenu(app, &currentRenderer, aboutWin)
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetCustomMenu() in addFratcalsMenu() ?
 		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
 
+		// the "Window" menu only gets added when the calls to setCustomAppMenu, addFractalsMenu, and rebuildMenus are commented out
+		addWindowMenu(app)
+
 		rebuildMenus()
-
-		// TODO(jbunds): replace the native "About ..." application menu item action instead of appending to the menu
-		appendAboutMenuItem(app, &currentRenderer, aboutWin)
-
-//		if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
-//			winMenu.AddItem(gogpu.MenuItem{Separator: true})
-//			winMenu.AddItem(gogpu.MenuItem{
-//				Title: fmt.Sprintf("mandelbrot - %s", params.name),
-//				Role:  gogpu.RoleShowAll,         // no RoleMaximize
-//				Role:  gogpu.RoleBringAllToFront, // no RoleMaximize
-//			})
-//		}
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {

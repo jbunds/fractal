@@ -18,112 +18,9 @@ import (
 	"golang.org/x/text/language"
 )
 
-// TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
-
-// addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
-// fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
-// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
-// from a preset list of named (or unnamed) parameters.
-func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
-	fractals                := fractals()
-	labels, sortedMenuItems := labels(fractals)
-	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
-
-	for _, kind := range kinds(fractals) {
-		fractalMenu := gogpu.NewMenu()
-		for _, name := range sortedMenuItems[kind] {
-			newFractal := fractals[name]
-			label      := labels[kind][name]
-			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
-				curRenderer := cr.Load().(*renderer)
-				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
-				newRenderer.init(app, curRenderer.theme)
-				oldRenderer := cr.Swap(newRenderer).(*renderer)
-				oldRenderer.release()
-				scheduleMenuRebuild()
-				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
-				//               icon in the window's title bar, preferably by somehow hiding the primary window
-				//               instead of actually closing it, easily facilitating its reuse here
-				//
-				//               note that attempting to instantiate a new "primary" window here
-				//               via app.NewWindow() will crash the program
-				app.SetTitle(newFractal.titleText)
-				app.RequestRedraw()
-				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
-				                           // on the "close window" icon in the primary window's title bar
-			}})
-		}
-		fractalsMenu.AddItem(gogpu.MenuItem{
-			Title:   cases.Title(language.English).String(kind),
-			Submenu: fractalMenu,
-		})
-	}
-
-	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
-	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("fractals", fractalsMenu) // either this call or the call to app.SetCustomMenu() in rebuildMenus() erroneously extends the native application menu
-}
-
-// labels creates formatted and sorted lists of labels for UI elements as maps keyed off the given map.
-func labels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
-	maxLen := make(map[string]int)
-	for _, fractal := range fractals {
-		maxLen[fractal.kind] = max(maxLen[fractal.kind], len(normalizeName(fractal.name)))
-	}
-
-	format := map[string]string{ // TODO(jbunds): encapsulate format strings in params.go
-		"mandelbrot": fmt.Sprintf("%%-%ds  %%v, %%vi", maxLen["mandelbrot"] + 1),
-		"julia":      fmt.Sprintf("%%-%ds  c = %%v + %%vi", maxLen["julia"] + 1),
-	}
-
-	labelEntries    := make(map[string]map[string]string, len(fractals)) // fractal-specific formatted menu item text and window title
-	sortedMenuItems := make(map[string][]string)                         // fractal-kind-specific sorted list of menu items
-
-	for _, kind := range kinds(fractals) {
-		labelEntries[kind]  = make(map[string]string)
-
-		sortedFractalNames := slices.SortedFunc(fractalNamesByKind(fractals, kind), func(a, b string) int {
-			// TODO(jbunds): clean this up
-			prioA := 0; if isUnnamed(a) { prioA = 1 }
-			prioB := 0; if isUnnamed(b) { prioB = 1 }
-			if prioA != prioB { return prioA - prioB }
-			return cmp.Compare(a, b)
-		})
-
-		sortedMenuItems[kind] = sortedFractalNames
-
-		for _, name := range sortedFractalNames {
-			fractal     := fractals[name]
-			displayName := normalizeName(fractal.name)
-			
-			switch kind { // TODO(jbunds): encapsulate fractal-kind-specific UI display logic and special case handling in params.go
-			case "mandelbrot":
-				displayXReal := fmt.Sprintf("%v", fractal.params.xReal) // hack to avoid using strconv
-				if !strings.HasPrefix(displayXReal, "-") {
-					displayXReal = " " + fmt.Sprintf("%v", fractal.params.xReal)
-				}
-				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayXReal, fractal.params.yImag)
-			case "julia":
-				displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
-				displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
-				if !strings.HasPrefix(displayCReal, "-") {
-					displayCReal = " " + fmt.Sprintf("%v", fractal.params.cReal)
-				}
-				if fractal.name == "golden" { // special handle "golden", since φ is irrational, hence its decimal representation is infinite
-					displayCReal = "(φ - 2)"
-					displayCImag = "(φ - 1)"
-				}
-				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayCReal, displayCImag)
-			}
-		}
-	}
-
-	return labelEntries, sortedMenuItems
-}
-
-// appendAboutMenuItem appends an "About Fractal" menu item to the application
-// menu which renders a small window with some text when selected.
-func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
+// setCustomAppMenu sets the application menu with a custom "About Fractal" manu
+// item which renders a small translucent window with some text when selected.
+func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
 	app.SetMenu(gogpu.NewMenu().
 		// TODO(jbunds): fix bug whereby selecting the custom "About Fractal" item from the
 		//               application menu incorrectly renders a new frame to the primary window
@@ -138,14 +35,6 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 		AddItem(gogpu.MenuItem{Title: "Show All",      Role: gogpu.RoleShowAll}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit}))
-
-//	appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication)
-//	appMenu.AddItem(gogpu.MenuItem{Separator: true})
-//	appMenu.AddItem(gogpu.MenuItem{
-//		Title:  " \u24D8  About Fractal", // or " ⓘ   About Fractal"
-//		Role:   gogpu.RoleAbout, // doesn't prepend the "circled i" system icon to the title like RolePreferences (gear icon) or RoleQuit ("boxed x" icon) roles do
-//		Action: func() { aboutWin.Show() },
-//	})
 
 	var (
 		release  func()
@@ -206,6 +95,123 @@ func appendAboutMenuItem(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Windo
 //		}
 //		return true
 //	})
+}
+
+// addWindowMenu adds a standard "Window" menu.
+func addWindowMenu(app *gogpu.App) {
+	if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
+		winMenu.AddItem(gogpu.MenuItem{Title: "Minimize",           Role: gogpu.RoleMinimize})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Zoom",               Role: gogpu.RoleZoom})
+		winMenu.AddItem(gogpu.MenuItem{Separator: true})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Enter Full Screen",  Role: gogpu.RoleFullScreen})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Show / Hide All",    Role: gogpu.RoleShowAll})
+		winMenu.AddItem(gogpu.MenuItem{Separator: true})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Bring All to Front", Role: gogpu.RoleBringAllToFront})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Close",              Role: gogpu.RoleClose})
+	}
+}
+
+// TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
+
+// addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
+// fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
+// to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
+// from a preset list of named (or unnamed) parameters.
+func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
+	fractals                := fractals()
+	labels, sortedMenuItems := labels(fractals)
+	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
+
+	for _, kind := range kinds(fractals) {
+		fractalMenu := gogpu.NewMenu()
+		for _, name := range sortedMenuItems[kind] {
+			newFractal := fractals[name]
+			label      := labels[kind][name]
+			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
+				curRenderer := cr.Load().(*renderer)
+				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
+				newRenderer.init(app, curRenderer.theme)
+				oldRenderer := cr.Swap(newRenderer).(*renderer)
+				oldRenderer.release()
+				scheduleMenuRebuild()
+				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
+				//               icon in the window's title bar, preferably by somehow hiding the primary window
+				//               instead of actually closing it, easily facilitating its reuse here
+				//
+				//               note that attempting to instantiate a new "primary" window here
+				//               via app.NewWindow() will crash the program
+				app.SetTitle(newFractal.titleText)
+				app.RequestRedraw()
+				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
+				                           // on the "close window" icon in the primary window's title bar
+			}})
+		}
+		fractalsMenu.AddItem(gogpu.MenuItem{
+			Title:   cases.Title(language.English).String(kind),
+			Submenu: fractalMenu,
+		})
+	}
+
+	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
+	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
+	app.SetCustomMenu("fractals", fractalsMenu)
+}
+
+// labels creates formatted and sorted lists of labels for UI elements as maps keyed off the given map.
+func labels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
+	maxLen := make(map[string]int)
+	for _, fractal := range fractals {
+		maxLen[fractal.kind] = max(maxLen[fractal.kind], len(normalizeName(fractal.name)))
+	}
+
+	format := map[string]string{ // TODO(jbunds): encapsulate format strings in params.go
+		"mandelbrot": fmt.Sprintf("%%-%ds  %%v, %%vi", maxLen["mandelbrot"] + 1),
+		"julia":      fmt.Sprintf("%%-%ds  c = %%v + %%vi", maxLen["julia"] + 1),
+	}
+
+	labelEntries    := make(map[string]map[string]string, len(fractals)) // fractal-specific formatted menu item text and window title
+	sortedMenuItems := make(map[string][]string)                         // fractal-kind-specific sorted list of menu items
+
+	for _, kind := range kinds(fractals) {
+		labelEntries[kind]  = make(map[string]string)
+
+		sortedFractalNames := slices.SortedFunc(fractalNamesByKind(fractals, kind), func(a, b string) int {
+			// TODO(jbunds): clean this up
+			prioA := 0; if isUnnamed(a) { prioA = 1 }
+			prioB := 0; if isUnnamed(b) { prioB = 1 }
+			if prioA != prioB { return prioA - prioB }
+			return cmp.Compare(a, b)
+		})
+
+		sortedMenuItems[kind] = sortedFractalNames
+
+		for _, name := range sortedFractalNames {
+			fractal     := fractals[name]
+			displayName := normalizeName(fractal.name)
+			
+			switch kind { // TODO(jbunds): encapsulate fractal-kind-specific UI display logic and special case handling in params.go
+			case "mandelbrot":
+				displayXReal := fmt.Sprintf("%v", fractal.params.xReal) // hack to avoid using strconv
+				if !strings.HasPrefix(displayXReal, "-") {
+					displayXReal = " " + fmt.Sprintf("%v", fractal.params.xReal)
+				}
+				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayXReal, fractal.params.yImag)
+			case "julia":
+				displayCReal := fmt.Sprintf("%v", fractal.params.cReal) // hack to avoid using strconv
+				displayCImag := fmt.Sprintf("%v", fractal.params.cImag)
+				if !strings.HasPrefix(displayCReal, "-") {
+					displayCReal = " " + fmt.Sprintf("%v", fractal.params.cReal)
+				}
+				if fractal.name == "golden" { // special handle "golden", since φ is irrational, hence its decimal representation is infinite
+					displayCReal = "(φ - 2)"
+					displayCImag = "(φ - 1)"
+				}
+				labelEntries[kind][name] = fmt.Sprintf(format[kind], displayName + ":", displayCReal, displayCImag)
+			}
+		}
+	}
+
+	return labelEntries, sortedMenuItems
 }
 
 // drawAboutWindow draws the About window once on demand.
