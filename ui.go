@@ -34,7 +34,7 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) 
 		AddItem(gogpu.MenuItem{Title: "Hide Others",   Role: gogpu.RoleHideOthers}).
 		AddItem(gogpu.MenuItem{Title: "Show All",      Role: gogpu.RoleShowAll}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit}))
+		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit, Action: func() { app.Quit() }}))
 
 	var (
 		release  func()
@@ -50,11 +50,8 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) 
 //		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 //			if mods.HasSuper() {
 //				switch key {
-//				case gpucontext.KeyW: // ⌘+w
+//				case gpucontext.KeyW: // ⌘+W
 //					aboutWin.Close()
-//				case gpucontext.KeyQ: // ⌘+q
-//					cr.Load().(*renderer).release()
-//					app.Quit()
 //				}
 //			}
 //		})
@@ -72,18 +69,18 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) 
 	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
 	//
 	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
-	// "About Fractal" window is focused and ⌘+w is pressed, the primary window closes
+	// "About Fractal" window is focused and ⌘+W is pressed, the primary window closes
 	//
-	// TODO(jbunds): intercept ⌘+w and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+w is pressed
+	// TODO(jbunds): intercept ⌘+W and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+W is pressed
 	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
 	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
 
 //	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-//		// checking aboutWin.Visible() doesn't help here, ⌘+w still closes the primary window even when the About window has focus
+//		// checking aboutWin.Visible() doesn't help here, ⌘+W still closes the primary window even when the About window has focus
 //		// why is https://pkg.go.dev/github.com/gogpu/gogpu#App.HasFocus a method on App instead of Window ?
 //		// https://pkg.go.dev/github.com/gogpu/gpucontext#FocusEvent
 //		//aboutWin.HasFocus()
-//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
+//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+W
 //			aboutWin.Close()
 //		}
 //	})
@@ -97,26 +94,15 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) 
 //	})
 }
 
-// addWindowMenu adds a standard "Window" menu.
-func addWindowMenu(app *gogpu.App) {
-	if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
-		winMenu.AddItem(gogpu.MenuItem{Title: "Minimize",           Role: gogpu.RoleMinimize})
-		winMenu.AddItem(gogpu.MenuItem{Title: "Zoom",               Role: gogpu.RoleZoom})
-		winMenu.AddItem(gogpu.MenuItem{Separator: true})
-		winMenu.AddItem(gogpu.MenuItem{Title: "Enter Full Screen",  Role: gogpu.RoleFullScreen})
-		winMenu.AddItem(gogpu.MenuItem{Title: "Show / Hide All",    Role: gogpu.RoleShowAll})
-		winMenu.AddItem(gogpu.MenuItem{Separator: true})
-		winMenu.AddItem(gogpu.MenuItem{Title: "Bring All to Front", Role: gogpu.RoleBringAllToFront})
-		winMenu.AddItem(gogpu.MenuItem{Title: "Close",              Role: gogpu.RoleClose})
-	}
-}
-
 // TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
 
 // addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
 // fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
 // to zoom in on for the Mandelbrot set, or complex constant for the filled Julia set)
 // from a preset list of named (or unnamed) parameters.
+//
+// Selecting a new fractal from the menu also schedules a rebuild of the "Themes" menu
+// to use the new renderer so the two menus remain in sync.
 func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
 	fractals                := fractals()
 	labels, sortedMenuItems := labels(fractals)
@@ -127,13 +113,17 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 		for _, name := range sortedMenuItems[kind] {
 			newFractal := fractals[name]
 			label      := labels[kind][name]
-			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() {
+			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() { // TODO(jbunds): disable the menu item for the fractal currently being rendered
 				curRenderer := cr.Load().(*renderer)
+				if newFractal.kind == curRenderer.fractal.kind &&
+				   newFractal.name == curRenderer.fractal.name {
+					return
+				}
 				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
 				newRenderer.init(app, curRenderer.theme)
 				oldRenderer := cr.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
-				scheduleMenuRebuild()
+				scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
 				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
 				//               icon in the window's title bar, preferably by somehow hiding the primary window
 				//               instead of actually closing it, easily facilitating its reuse here
@@ -212,6 +202,21 @@ func labels(fractals map[string]*fractal) (map[string]map[string]string, map[str
 	}
 
 	return labelEntries, sortedMenuItems
+}
+
+// addWindowMenu adds a standard "Window" menu.
+func addWindowMenu(app *gogpu.App) {
+	// TODO(jbunds): fix this so a "Window" menu is actually added to the menu bar.
+	if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
+		winMenu.AddItem(gogpu.MenuItem{Title: "Minimize",           Role: gogpu.RoleMinimize})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Zoom",               Role: gogpu.RoleZoom})
+		winMenu.AddItem(gogpu.MenuItem{Separator: true})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Enter Full Screen",  Role: gogpu.RoleFullScreen})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Show / Hide All",    Role: gogpu.RoleShowAll})
+		winMenu.AddItem(gogpu.MenuItem{Separator: true})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Bring All to Front", Role: gogpu.RoleBringAllToFront})
+		winMenu.AddItem(gogpu.MenuItem{Title: "Close",              Role: gogpu.RoleClose})
+	}
 }
 
 // drawAboutWindow draws the About window once on demand.

@@ -21,10 +21,9 @@ type parameters struct {
 }
 
 type fractal struct {
-	kind,
-	name,
-	titleText string
-	params    *parameters
+	kind, name,
+	titleText   string
+	params      *parameters
 }
 
 func fractals() map[string]*fractal {

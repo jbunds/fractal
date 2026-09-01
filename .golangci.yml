@@ -69,6 +69,7 @@ linters:
             - strings
             - sync
             - sync/atomic
+            - syscall
             - time
             - unsafe
             - github.com/gogpu/gg

@@ -12,11 +12,14 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"os/signal"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -149,16 +152,15 @@ func main() {
 
 	currentRenderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
 
-	scheduleMenuRebuild := func() { // TODO(jbunds): move scheduleMenuRebuild into ui.go
-		pendingMenuRebuild = true
-	}
+	scheduleMenuRebuild := func() { pendingMenuRebuild = true }
 
-	rebuildMenus := func() { // TODO(jbunds): move rebuildMenus into ui.go
+	rebuildThemesMenu := func() { // indirectly called (via app.OnUpdate) by addFractalsMenu when a new fractal is selected from the "Fractals" menu
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
-		for cs := range maps.Keys(colorSchemes()) {
-			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): disable the current theme
+		for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
+			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
 				cr := currentRenderer.Load().(*renderer)
 				if cr.theme == cs { return }
+				// apply the new theme to the current renderer
 				newRenderer := newRenderer(cr.fractal, shaderCode[cr.fractal.kind], cs)
 				newRenderer.init(app, cs)
 				oldRenderer := currentRenderer.Swap(newRenderer).(*renderer)
@@ -171,12 +173,22 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan,
+		syscall.SIGINT,  // ctrl+c
+		syscall.SIGTERM, // standard kill signal
+		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
+	go func() {
+		<-sigChan
+		app.Quit() // triggers OnClose() to ensure clean progress bar shutdown
+	}()
+
 	prog := progress.New(ctx, maxPrecisionFrames, os.Stderr,
 		progress.WithTracker(progress.Fraction),
 		progress.WithTheme("magma"),
 		progress.WithPersistBar(true),
 	)
-	defer prog.Close()
+	defer prog.Close() // idempotent (first call wins); called via panic() paths
 
 	// GoGPU callback registrations and definitions
 
@@ -186,7 +198,7 @@ func main() {
 		primaryWindow = app.PrimaryWindow()
 
 		// heavy-handed workaround: preclude users closing the primary window via the "close window"
-		// icon in the title bar (i.e., the red circle on macOS; can still be hidden via ⌘+w)
+		// icon in the title bar (i.e., the red circle on macOS; can still be hidden via ⌘+W)
 		primaryWindow.SetOnClose(func() bool {
 			// primaryWindow.Hide() // will crash the program
 			return false
@@ -208,41 +220,36 @@ func main() {
 
 		setCustomAppMenu(app, &currentRenderer, aboutWin)
 
-		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
-		//                which may be triggered by customizing the menus per
-		//                the call to app.SetCustomMenu() in addFratcalsMenu() ?
 		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
 
-		// the "Window" menu only gets added when the calls to setCustomAppMenu, addFractalsMenu, and rebuildMenus are commented out
-		addWindowMenu(app)
+		rebuildThemesMenu()
 
-		rebuildMenus()
+		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
+		//                which may be triggered by customizing the menus per
+		//                the call to app.SetCustomMenu() in addFractalsMenu() ?
+		//
+		//                the "Window" menu only gets added without the calls to setCustomAppMenu,
+		//                addFractalsMenu, and applyNewThemeAndUpdateThemesMenu
+		addWindowMenu(app)
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		// GoGPU sets the ⌘+Q `keyEquivalent` for `RoleQuit` menu items,
+		// so no special handling (e.g., calling app.Quit()) is required
 		switch {
-		case mods.HasSuper():
-			switch key {
-			case gpucontext.KeyQ: // ⌘+q
-				currentRenderer.Load().(*renderer).release()
-				gg.CloseAccelerator()
-				prog.Close()
-				cancel()
-				app.Quit()
-			case gpucontext.KeyW: // ⌘+w
-				if animToken.Load() != nil {
-					animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
-				}
-				primaryWindow.Hide()
+		case mods.HasSuper() && key == gpucontext.KeyW: // ⌘+W
+			if animToken.Load() != nil {
+				animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
 			}
-		case key == gpucontext.KeySpace:
+			primaryWindow.Hide()
+		case key == gpucontext.KeySpace: // space bar
 			toggleAnimation(app, &animToken)
 		}
 	})
 
 	app.OnUpdate(func(_ float64) {
 		if pendingMenuRebuild {
-			rebuildMenus()
+			rebuildThemesMenu()
 			pendingMenuRebuild = false
 		}
 	})
@@ -264,7 +271,7 @@ func main() {
 		if cr.state.frameCount <= maxPrecisionFrames {
 			prog.Report(1, strconv.Itoa(cr.state.frameCount))
 		} else {
-			prog.Close()
+			prog.Close() // normal progress bar shutdown sequence
 		}
 
 		if animToken.Load() != nil {
@@ -274,7 +281,9 @@ func main() {
 
 	app.OnClose(func() {
 		currentRenderer.Load().(*renderer).release()
-		cancel()
+		gg.CloseAccelerator()
+		cancel()     // user quit before the progress bar finished; signal context first...
+		prog.Close() // ...then blocks until the progress bar's renderLoop goroutine exits
 	})
 
 	lastFrameTime = time.Now()
@@ -282,8 +291,14 @@ func main() {
 	// main event loop
 
 	if err := app.Run(); err != nil {
-		panic(err)
+		// OnClose() may not have been triggered; clean up defensively
+		currentRenderer.Load().(*renderer).release()
+		gg.CloseAccelerator()
+		cancel()
+		panic(err) // deferred call to prog.Close() triggered here
 	}
+
+	cancel()
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
