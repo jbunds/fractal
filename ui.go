@@ -178,11 +178,11 @@ func renderAboutWindow(cc *gg.Context, fontFace text.Face) (*gpucontext.TextureV
 	cc.BeginGPUFrame()
 	cc.ClearWithColor(gg.Transparent)
 
-	cc.SetColor(gg.Transparent) // background
+	cc.SetColor(gg.Transparent)
 	cc.DrawRectangle(0, 0, aboutWidth, aboutHeight)
 	cc.Fill()
 
-	cc.SetColor(gg.White)       // foreground
+	cc.SetColor(gg.RGB(1, 0.9725, 0.8627)) // approximates "cornsilk"
 	cc.SetFont(fontFace)
 	cc.DrawString("Fractal 1.0",      15, 30)
 	cc.DrawString("Jeff Bunds",       15, 50)
