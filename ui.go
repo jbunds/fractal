@@ -20,11 +20,11 @@ import (
 
 // setCustomAppMenu sets the application menu with a custom "About Fractal" manu
 // item which renders a small translucent window with some text when selected.
-func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) {
+func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWindow *gogpu.Window, aboutWindowIsOpen *atomic.Bool) {
 	app.SetMenu(gogpu.NewMenu().
 		// TODO(jbunds): fix bug whereby selecting the custom "About Fractal" item from the
 		//               application menu incorrectly renders a new frame to the primary window
-		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() { aboutWin.Show() }}).
+		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() { aboutWindow.Show() }}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Settings…",     Role: gogpu.RolePreferences}).
 		AddItem(gogpu.MenuItem{Separator: true}).
@@ -41,57 +41,35 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWin *gogpu.Window) 
 		drawOnce sync.Once
 	)
 
-	aboutWin.SetOnDraw(func(dc *gogpu.Context) {
+	aboutWindow.SetOnDraw(func(dc *gogpu.Context) {
 		drawOnce.Do(func() {
 			release = drawAboutWindow(app, dc, cr)
 		})
 	})
 
-//		aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-//			if mods.HasSuper() {
-//				switch key {
-//				case gpucontext.KeyW: // ⌘+W
-//					aboutWin.Close()
-//				}
-//			}
-//		})
+	aboutWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		if mods.HasSuper() && key == gpucontext.KeyW {
+			if release != nil {
+				release()
+			}
+			aboutWindowIsOpen.Store(false)
+			aboutWindow.Hide()
+			if app.PrimaryWindow().Visible() {
+				app.PrimaryWindow().Show()
+			}
+		}
+	})
 
-	aboutWin.SetOnClose(func() bool {
-// properly handle the primary window losing focus:
-//   https://pkg.go.dev/github.com/gogpu/ui/widget#ContextImpl.RequestFocus
-//		app.PrimaryWindow().Show()
+	aboutWindow.SetOnClose(func() bool {
 		if release != nil {
 			release()
 		}
+		aboutWindowIsOpen.Store(false)
+		if app.PrimaryWindow().Visible() {
+			app.PrimaryWindow().Show()
+		}
 		return true
 	})
-
-	// https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-	//
-	// despite what the godoc ^ claims ("fires only when w2 is focused"), when the
-	// "About Fractal" window is focused and ⌘+W is pressed, the primary window closes
-	//
-	// TODO(jbunds): intercept ⌘+W and call aboutWin.Close() ONLY if aboutWin has focus when ⌘+W is pressed
-	//               fixing this may require github.com/gogpu/ui/app and github.com/gogpu/ui/desktop
-	//               https://pkg.go.dev/github.com/gogpu/gogpu#readme-multi-window-input
-
-//	aboutWin.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-//		// checking aboutWin.Visible() doesn't help here, ⌘+W still closes the primary window even when the About window has focus
-//		// why is https://pkg.go.dev/github.com/gogpu/gogpu#App.HasFocus a method on App instead of Window ?
-//		// https://pkg.go.dev/github.com/gogpu/gpucontext#FocusEvent
-//		//aboutWin.HasFocus()
-//		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+W
-//			aboutWin.Close()
-//		}
-//	})
-//
-//	aboutWin.SetOnClose(func() bool {
-//		app.PrimaryWindow().Show() // i don't know why the primary window loses focus, but it does...
-//		if release != nil {
-//			release()
-//		}
-//		return true
-//	})
 }
 
 // TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
@@ -117,6 +95,7 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 				curRenderer := cr.Load().(*renderer)
 				if newFractal.kind == curRenderer.fractal.kind &&
 				   newFractal.name == curRenderer.fractal.name {
+					app.PrimaryWindow().Show()
 					return
 				}
 				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
@@ -124,16 +103,9 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 				oldRenderer := cr.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
 				scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
-				// TODO(jbunds): handle case where user closed the primary window by clicking on the "close window"
-				//               icon in the window's title bar, preferably by somehow hiding the primary window
-				//               instead of actually closing it, easily facilitating its reuse here
-				//
-				//               note that attempting to instantiate a new "primary" window here
-				//               via app.NewWindow() will crash the program
 				app.SetTitle(newFractal.titleText)
 				app.RequestRedraw()
-				app.PrimaryWindow().Show() // program will crash here if the user closed the primary window by clicking
-				                           // on the "close window" icon in the primary window's title bar
+				app.PrimaryWindow().Show()
 			}})
 		}
 		fractalsMenu.AddItem(gogpu.MenuItem{

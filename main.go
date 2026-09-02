@@ -114,7 +114,13 @@ func main() {
 		lastFrameTime      time.Time
 		animToken          atomic.Pointer[gogpu.AnimationToken]
 		currentRenderer    atomic.Value
+
+		// TODO(jbunds): consider encapsulating the following within a "ui" struct
 		pendingMenuRebuild bool
+		primaryWindow,
+		aboutWindow        *gogpu.Window
+		hidePrimaryWindow,
+		aboutWindowIsOpen  atomic.Bool
 	)
 
 	fractal, theme, err := flags(flag.CommandLine, os.Args[1:])
@@ -154,7 +160,7 @@ func main() {
 
 	scheduleMenuRebuild := func() { pendingMenuRebuild = true }
 
-	rebuildThemesMenu := func() { // indirectly called (via app.OnUpdate) by addFractalsMenu when a new fractal is selected from the "Fractals" menu
+	rebuildThemesMenu := func() { // indirectly called (via OnUpdate) by addFractalsMenu when a new fractal is selected from the "Fractals" menu
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
 		for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
@@ -192,19 +198,8 @@ func main() {
 
 	// GoGPU callback registrations and definitions
 
-	var primaryWindow *gogpu.Window
-
 	app.OnSurfaceAvailable(func() {
-		primaryWindow = app.PrimaryWindow()
-
-		// heavy-handed workaround: preclude users closing the primary window via the "close window"
-		// icon in the title bar (i.e., the red circle on macOS; can still be hidden via ⌘+W)
-		primaryWindow.SetOnClose(func() bool {
-			// primaryWindow.Hide() // will crash the program
-			return false
-		})
-
-		aboutWin, err := app.NewWindow(gogpu.DefaultConfig().
+		aboutWindow, err = app.NewWindow(gogpu.DefaultConfig().
 			WithTitle("").
 			WithSize(aboutWidth, aboutHeight).
 			WithTransparent(true).
@@ -213,12 +208,33 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		aboutWin.Hide()
+		aboutWindow.Hide()
+		aboutWindowIsOpen.Store(false)
+
+		primaryWindow = app.PrimaryWindow()
+
+		primaryWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+			if mods.HasSuper() && key == gpucontext.KeyW {
+				if primaryWindow.Visible() {
+					if animToken.Load() != nil {
+						animToken.Swap(nil)
+					}
+					primaryWindow.Hide()
+				}
+			}
+		})
+
+		primaryWindow.SetOnClose(func() bool {
+			if !aboutWindowIsOpen.Load() && primaryWindow.Visible() {
+				hidePrimaryWindow.Store(true)
+			}
+			return false
+		})
 
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app, cr.theme)
 
-		setCustomAppMenu(app, &currentRenderer, aboutWin)
+		setCustomAppMenu(app, &currentRenderer, aboutWindow, &aboutWindowIsOpen)
 
 		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
 
@@ -233,16 +249,8 @@ func main() {
 		addWindowMenu(app)
 	})
 
-	app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-		// GoGPU sets the ⌘+Q `keyEquivalent` for `RoleQuit` menu items,
-		// so no special handling (e.g., calling app.Quit()) is required
-		switch {
-		case mods.HasSuper() && key == gpucontext.KeyW: // ⌘+W
-			if animToken.Load() != nil {
-				animToken.Swap(nil) // reduce GPU load by suspending animation while the primary window is hidden
-			}
-			primaryWindow.Hide()
-		case key == gpucontext.KeySpace: // space bar
+	app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
+		if key == gpucontext.KeySpace {
 			toggleAnimation(app, &animToken)
 		}
 	})
@@ -251,6 +259,9 @@ func main() {
 		if pendingMenuRebuild {
 			rebuildThemesMenu()
 			pendingMenuRebuild = false
+		}
+		if !aboutWindowIsOpen.Load() && hidePrimaryWindow.Swap(false) {
+			primaryWindow.Hide()
 		}
 	})
 
@@ -282,8 +293,8 @@ func main() {
 	app.OnClose(func() {
 		currentRenderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
-		cancel()     // user quit before the progress bar finished; signal context first...
-		prog.Close() // ...then blocks until the progress bar's renderLoop goroutine exits
+		cancel()
+		prog.Close()
 	})
 
 	lastFrameTime = time.Now()
@@ -291,7 +302,6 @@ func main() {
 	// main event loop
 
 	if err := app.Run(); err != nil {
-		// OnClose() may not have been triggered; clean up defensively
 		currentRenderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
 		cancel()
