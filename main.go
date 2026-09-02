@@ -120,6 +120,7 @@ func main() {
 		primaryWindow,
 		aboutWindow        *gogpu.Window
 		hidePrimaryWindow,
+		hideAboutWindow,
 		aboutWindowIsOpen  atomic.Bool
 	)
 
@@ -160,7 +161,7 @@ func main() {
 
 	scheduleMenuRebuild := func() { pendingMenuRebuild = true }
 
-	rebuildThemesMenu := func() { // indirectly called (via OnUpdate) by addFractalsMenu when a new fractal is selected from the "Fractals" menu
+	rebuildThemesMenu := func() { // indirectly called via OnUpdate() by addFractalsMenu when a new fractal is selected from the menu
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
 		for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
@@ -186,7 +187,7 @@ func main() {
 		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
 	go func() {
 		<-sigChan
-		app.Quit() // triggers OnClose() to ensure clean progress bar shutdown
+		app.Quit()       // triggers OnClose() to ensure clean progress bar shutdown
 	}()
 
 	prog := progress.New(ctx, maxPrecisionFrames, os.Stderr,
@@ -194,7 +195,7 @@ func main() {
 		progress.WithTheme("magma"),
 		progress.WithPersistBar(true),
 	)
-	defer prog.Close() // idempotent (first call wins); called via panic() paths
+	defer prog.Close() // called via panic() paths (idempotent)
 
 	// GoGPU callback registrations and definitions
 
@@ -214,10 +215,18 @@ func main() {
 		primaryWindow = app.PrimaryWindow()
 
 		primaryWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-			if mods.HasSuper() && key == gpucontext.KeyW {
+			if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
+				if aboutWindowIsOpen.Load() {
+					aboutWindow.Hide()
+					aboutWindowIsOpen.Store(false)
+					if primaryWindow.Visible() {
+						primaryWindow.Show()
+					}
+					return
+				}
 				if primaryWindow.Visible() {
-					if animToken.Load() != nil {
-						animToken.Swap(nil)
+					if oldToken := animToken.Swap(nil); oldToken != nil {
+						oldToken.Stop()
 					}
 					primaryWindow.Hide()
 				}
@@ -225,16 +234,20 @@ func main() {
 		})
 
 		primaryWindow.SetOnClose(func() bool {
-			if !aboutWindowIsOpen.Load() && primaryWindow.Visible() {
+			if primaryWindow.Visible() {
+				if oldToken := animToken.Swap(nil); oldToken != nil {
+					oldToken.Stop()
+				}
 				hidePrimaryWindow.Store(true)
+				app.RequestRedraw() // ensure OnUpdate() fires even if the animation is paused
 			}
-			return false
+			return false // reject the close window request and hide the window instead
 		})
 
 		cr := currentRenderer.Load().(*renderer)
 		cr.init(app, cr.theme)
 
-		setCustomAppMenu(app, &currentRenderer, aboutWindow, &aboutWindowIsOpen)
+		setCustomAppMenu(app, &currentRenderer, aboutWindow, &aboutWindowIsOpen, &hideAboutWindow)
 
 		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
 
@@ -242,15 +255,15 @@ func main() {
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
-		//                the call to app.SetCustomMenu() in addFractalsMenu() ?
+		//                the call to app.SetMenu() or app.SetCustomMenu() (?)
 		//
-		//                the "Window" menu only gets added without the calls to setCustomAppMenu,
-		//                addFractalsMenu, and applyNewThemeAndUpdateThemesMenu
+		//                the "Window" menu only gets added without the calls to
+		//                setCustomAppMenu, addFractalsMenu, and rebuildThemesMenu
 		addWindowMenu(app)
 	})
 
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
-		if key == gpucontext.KeySpace {
+		if key == gpucontext.KeySpace { // space bar
 			toggleAnimation(app, &animToken)
 		}
 	})
@@ -260,8 +273,15 @@ func main() {
 			rebuildThemesMenu()
 			pendingMenuRebuild = false
 		}
-		if !aboutWindowIsOpen.Load() && hidePrimaryWindow.Swap(false) {
+		if hidePrimaryWindow.Swap(false) {
 			primaryWindow.Hide()
+		}
+		if hideAboutWindow.Swap(false) {
+			aboutWindow.Hide()
+			aboutWindowIsOpen.Store(false)
+			if primaryWindow.Visible() {
+				primaryWindow.Show()
+			}
 		}
 	})
 
@@ -324,7 +344,6 @@ func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 		gpu:     &gpu{shaderCode: shaderCode},
 		assets:  &assets{},
 		state:   &state{
-			frameCount:    0,
 			viewportWidth: viewportWidth,
 			xRealHi:       xRealHi,
 			xRealLo:       xRealLo,
@@ -433,7 +452,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		if t := token.Load(); t != nil {
 			t.Stop()
 		}
-		r.release()
 		// fmt.Println("stopped rendering (precision exhausted)")
 		return
 	}
