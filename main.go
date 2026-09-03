@@ -108,22 +108,24 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 	cRealHi,     cImagHi, cRealLo, cImagLo float32 // block 4
 }
 
+// ui encapsulates GUI state and orchestrates window and animation lifecycle.
+type ui struct {
+	app                  *gogpu.App
+	primaryWindow,
+	aboutWindow          *gogpu.Window
+	renderer             atomic.Value
+	animToken            atomic.Pointer[gogpu.AnimationToken]
+	lastFrameTime        time.Time
+	initTokenOnce        sync.Once
+	pendingMenuRebuild   bool
+	hidePrimaryWindow,
+	hideAboutWindow,
+	aboutWindowIsOpen,
+	aboutWindowHasFocus,
+	resumeAnimWhenShown  atomic.Bool
+}
+
 func main() {
-	var (
-		initTokenOnce      sync.Once
-		lastFrameTime      time.Time
-		animToken          atomic.Pointer[gogpu.AnimationToken]
-		currentRenderer    atomic.Value
-
-		// TODO(jbunds): consider encapsulating the following within a "ui" struct
-		pendingMenuRebuild bool
-		primaryWindow,
-		aboutWindow        *gogpu.Window
-		hidePrimaryWindow,
-		hideAboutWindow,
-		aboutWindowIsOpen  atomic.Bool
-	)
-
 	fractal, theme, err := flags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse flags: %v\n", err)
@@ -137,13 +139,15 @@ func main() {
 	//   gogpu.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
-	app := gogpu.NewApp(gogpu.DefaultConfig().
+	ui := new(ui)
+
+	ui.app = gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Fractal").
 		WithTitle(fractal.titleText).
 		WithSize(mainWidth, mainHeight).
 		WithResizable(false))
 
-	app.SetQuitOnLastWindowClosed(false)
+	ui.app.SetQuitOnLastWindowClosed(false)
 
 	removeComments := func(text string) string {
 		re := regexp.MustCompile(`(?m)^\s*//.*\n`)
@@ -157,25 +161,23 @@ func main() {
 		"julia":      removeComments(commonShaderCode + "\n" + juliaShaderCode),
 	}
 
-	currentRenderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
-
-	scheduleMenuRebuild := func() { pendingMenuRebuild = true }
+	ui.renderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
 
 	rebuildThemesMenu := func() { // indirectly called via OnUpdate() by addFractalsMenu when a new fractal is selected from the menu
 		themesMenu := gogpu.NewMenuWithTitle("Themes")
 		for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
 			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
-				cr := currentRenderer.Load().(*renderer)
+				cr := ui.renderer.Load().(*renderer)
 				if cr.theme == cs { return }
 				// apply the new theme to the current renderer
 				newRenderer := newRenderer(cr.fractal, shaderCode[cr.fractal.kind], cs)
-				newRenderer.init(app, cs)
-				oldRenderer := currentRenderer.Swap(newRenderer).(*renderer)
+				newRenderer.init(ui.app, cs)
+				oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
-				app.RequestRedraw()
+				ui.app.RequestRedraw()
 			}})
 		}
-		app.SetCustomMenu("themes", themesMenu)
+		ui.app.SetCustomMenu("themes", themesMenu)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -187,9 +189,10 @@ func main() {
 		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
 	go func() {
 		<-sigChan
-		app.Quit()       // triggers OnClose() to ensure clean progress bar shutdown
+		ui.app.Quit() // triggers OnClose() to ensure clean progress bar shutdown
 	}()
 
+	// TODO(jbunds): instantiate a new progress bar whenever a new fractal is selected via the "Fractals" menu
 	prog := progress.New(ctx, maxPrecisionFrames, os.Stderr,
 		progress.WithTracker(progress.Fraction),
 		progress.WithTheme("magma"),
@@ -199,8 +202,8 @@ func main() {
 
 	// GoGPU callback registrations and definitions
 
-	app.OnSurfaceAvailable(func() {
-		aboutWindow, err = app.NewWindow(gogpu.DefaultConfig().
+	ui.app.OnSurfaceAvailable(func() {
+		ui.aboutWindow, err = ui.app.NewWindow(gogpu.DefaultConfig().
 			WithTitle("").
 			WithSize(aboutWidth, aboutHeight).
 			WithTransparent(true).
@@ -209,47 +212,51 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		aboutWindow.Hide()
-		aboutWindowIsOpen.Store(false)
+		ui.aboutWindow.Hide()
+		ui.aboutWindowIsOpen.Store(false)
+		ui.aboutWindowHasFocus.Store(false)
 
-		primaryWindow = app.PrimaryWindow()
+		ui.primaryWindow = ui.app.PrimaryWindow()
 
-		primaryWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		ui.primaryWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 			if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
-				if aboutWindowIsOpen.Load() {
-					aboutWindow.Hide()
-					aboutWindowIsOpen.Store(false)
-					if primaryWindow.Visible() {
-						primaryWindow.Show()
-					}
-					return
-				}
-				if primaryWindow.Visible() {
-					if oldToken := animToken.Swap(nil); oldToken != nil {
-						oldToken.Stop()
-					}
-					primaryWindow.Hide()
+				if ui.aboutWindowHasFocus.Load() {
+					ui.hideAboutWindow.Store(true)
+					ui.app.RequestRedraw()
+				} else if ui.primaryWindow.Visible() {
+					ui.hidePrimaryWin()
 				}
 			}
 		})
 
-		primaryWindow.SetOnClose(func() bool {
-			if primaryWindow.Visible() {
-				if oldToken := animToken.Swap(nil); oldToken != nil {
-					oldToken.Stop()
-				}
-				hidePrimaryWindow.Store(true)
-				app.RequestRedraw() // ensure OnUpdate() fires even if the animation is paused
+		ui.primaryWindow.SetOnClose(func() bool {
+			if ui.primaryWindow.Visible() {
+				ui.hidePrimaryWin()
 			}
 			return false // reject the close window request and hide the window instead
 		})
 
-		cr := currentRenderer.Load().(*renderer)
-		cr.init(app, cr.theme)
+		// TODO(jbunds): fix the following bug:
+		//
+		//   1. launch the app
+		//   2. open the About window
+		//   3. use macOS "Hot Corners" to bring the primary application window into the foreground and give it focus
+		//   4. press ⌘+W
+		//   5. bug: the About window is closed instead of the primary application window
+		//
+		// i suspect this may be impossible to fix unless and until the GoGPU core API supports per-window focus tracking
+		ui.primaryWindow.SetOnPointer(func(e gpucontext.PointerEvent) {
+			if e.Type == gpucontext.PointerDown {
+				ui.aboutWindowHasFocus.Store(false)
+			}
+		})
 
-		setCustomAppMenu(app, &currentRenderer, aboutWindow, &aboutWindowIsOpen, &hideAboutWindow)
+		cr := ui.renderer.Load().(*renderer)
+		cr.init(ui.app, cr.theme)
 
-		addFractalsMenu(app, &currentRenderer, shaderCode, scheduleMenuRebuild)
+		setCustomAppMenu(ui)
+
+		addFractalsMenu(ui, shaderCode)
 
 		rebuildThemesMenu()
 
@@ -259,44 +266,45 @@ func main() {
 		//
 		//                the "Window" menu only gets added without the calls to
 		//                setCustomAppMenu, addFractalsMenu, and rebuildThemesMenu
-		addWindowMenu(app)
+		addWindowMenu(ui.app)
 	})
 
-	app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
+	ui.app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
 		if key == gpucontext.KeySpace { // space bar
-			toggleAnimation(app, &animToken)
+			toggleAnimation(ui.app, &ui.animToken)
 		}
 	})
 
-	app.OnUpdate(func(_ float64) {
-		if pendingMenuRebuild {
+	ui.app.OnUpdate(func(_ float64) {
+		if ui.pendingMenuRebuild {
 			rebuildThemesMenu()
-			pendingMenuRebuild = false
+			ui.pendingMenuRebuild = false
 		}
-		if hidePrimaryWindow.Swap(false) {
-			primaryWindow.Hide()
+		if ui.hidePrimaryWindow.Swap(false) {
+			ui.primaryWindow.Hide()
 		}
-		if hideAboutWindow.Swap(false) {
-			aboutWindow.Hide()
-			aboutWindowIsOpen.Store(false)
-			if primaryWindow.Visible() {
-				primaryWindow.Show()
+		if ui.hideAboutWindow.Swap(false) {
+			ui.aboutWindow.Hide()
+			ui.aboutWindowIsOpen.Store(false)
+			ui.aboutWindowHasFocus.Store(false)
+			if ui.primaryWindow.Visible() {
+				ui.primaryWindow.Show()
 			}
 		}
 	})
 
-	app.OnDraw(func(dc *gogpu.Context) {
-		cr := currentRenderer.Load().(*renderer)
-		cr.draw(dc, &animToken)
+	ui.app.OnDraw(func(dc *gogpu.Context) {
+		cr := ui.renderer.Load().(*renderer)
+		cr.draw(dc, &ui.animToken)
 
-		elapsed := time.Since(lastFrameTime).Milliseconds()
+		elapsed := time.Since(ui.lastFrameTime).Milliseconds()
 		if elapsed > 0 {
 			cr.state.fps = float64(1000.0 / elapsed)
 		}
-		lastFrameTime = time.Now()
+		ui.lastFrameTime = time.Now()
 
-		initTokenOnce.Do(func() {
-			animToken.Store(app.StartAnimation())
+		ui.initTokenOnce.Do(func() {
+			ui.animToken.Store(ui.app.StartAnimation())
 		})
 
 		if cr.state.frameCount <= maxPrecisionFrames {
@@ -305,24 +313,24 @@ func main() {
 			prog.Close() // normal progress bar shutdown sequence
 		}
 
-		if animToken.Load() != nil {
-			app.RequestRedraw() // renders at VSync frequency (~60 FPS)
+		if ui.animToken.Load() != nil {
+			ui.app.RequestRedraw() // renders at VSync frequency (~60 FPS)
 		}
 	})
 
-	app.OnClose(func() {
-		currentRenderer.Load().(*renderer).release()
+	ui.app.OnClose(func() {
+		ui.renderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
 		cancel()
 		prog.Close()
 	})
 
-	lastFrameTime = time.Now()
+	ui.lastFrameTime = time.Now()
 
 	// main event loop
 
-	if err := app.Run(); err != nil {
-		currentRenderer.Load().(*renderer).release()
+	if err := ui.app.Run(); err != nil {
+		ui.renderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
 		cancel()
 		panic(err) // deferred call to prog.Close() triggered here
@@ -355,6 +363,29 @@ func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 			cImagLo:       cImagLo,
 		},
 	}
+}
+
+// pauseAnimation stops the animation if running and records whether to resume on Show().
+func (u *ui) pauseAnimation() {
+	if oldToken := u.animToken.Swap(nil); oldToken != nil {
+		oldToken.Stop()
+		u.resumeAnimWhenShown.Store(true)
+	} else {
+		u.resumeAnimWhenShown.Store(false)
+	}
+}
+
+// hidePrimaryWin pauses the animation and defers hiding the primary window to OnUpdate().
+func (u *ui) hidePrimaryWin() {
+	u.pauseAnimation()
+	u.hidePrimaryWindow.Store(true) // defer call to primaryWindow.Hide() via OnUpdate() to avoid GoGPU internal mutex deadlock
+	u.app.RequestRedraw()           // ensure OnUpdate() fires even if the animation is paused
+}
+
+// scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
+func (u *ui) scheduleMenuRebuild() {
+	u.pendingMenuRebuild = true
+	u.app.RequestRedraw()
 }
 
 // init initializes all resources required to render frames in the main application window.

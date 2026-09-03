@@ -17,11 +17,15 @@ import (
 
 // setCustomAppMenu sets the application menu with a custom "About Fractal" manu
 // item which renders a small translucent window with some text when selected.
-func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWindow *gogpu.Window, aboutWindowIsOpen *atomic.Bool, hideAboutWindow *atomic.Bool) {
-	app.SetMenu(gogpu.NewMenu().
+func setCustomAppMenu(ui *ui) {
+	ui.app.SetMenu(gogpu.NewMenu().
 		// TODO(jbunds): fix bug whereby selecting the custom "About Fractal" item from the
 		//               application menu incorrectly renders a new frame to the primary window
-		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() { aboutWindow.Show(); aboutWindowIsOpen.Store(true) }}).
+		AddItem(gogpu.MenuItem{Title: "About Fractal", Role: gogpu.RoleAbout, Action: func() {
+			ui.aboutWindow.Show()
+			ui.aboutWindowIsOpen.Store(true)
+			ui.aboutWindowHasFocus.Store(true)
+		}}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Settings…",     Role: gogpu.RolePreferences}).
 		AddItem(gogpu.MenuItem{Separator: true}).
@@ -31,37 +35,36 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWindow *gogpu.Windo
 		AddItem(gogpu.MenuItem{Title: "Hide Others",   Role: gogpu.RoleHideOthers}).
 		AddItem(gogpu.MenuItem{Title: "Show All",      Role: gogpu.RoleShowAll}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit, Action: func() { app.Quit() }}))
+		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit, Action: func() { ui.app.Quit() }}))
 
 	var (
 		release  func()
 		drawOnce sync.Once
 	)
 
-	aboutWindow.SetOnDraw(func(dc *gogpu.Context) {
+	ui.aboutWindow.SetOnDraw(func(dc *gogpu.Context) {
 		drawOnce.Do(func() {
-			release = drawAboutWindow(app, dc, cr)
+			release = drawAboutWindow(ui.app, dc, &ui.renderer)
 		})
 	})
 
-	aboutWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+	ui.aboutWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
-			hideAboutWindow.Store(true) // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
-			app.RequestRedraw()         // ensure OnUpdate fires even if animation is paused
+			ui.hideAboutWindow.Store(true)      // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
+			ui.aboutWindowHasFocus.Store(false) // track which window has focus
+			ui.app.RequestRedraw()              // ensure OnUpdate() fires even if animation is paused
 		}
 	})
 
-	aboutWindow.SetOnClose(func() bool {
+	ui.aboutWindow.SetOnClose(func() bool {
 		if release != nil {
 			release()
 		}
-		hideAboutWindow.Store(true) // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
-		app.RequestRedraw()         // ensure OnUpdate fires even if animation is paused
-		return false                // reject native close / destroy request and hide instead to preserve window handle and callbacks
+		ui.hideAboutWindow.Store(true) // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
+		ui.app.RequestRedraw()         // ensure OnUpdate() fires even if animation is paused
+		return false                   // reject native close / destroy request and hide instead to preserve window handle and callbacks
 	})
 }
-
-// TODO(jbunds): refactor addFractalsMenu & labels (at least they're not in the hot path...)
 
 // addFractalsMenu creates a "Fractals" menu to allow users to select a new combination of
 // fractal kind ("Mandelbrot" or "Julia") and parameter of interest (target x, y coordinates
@@ -70,7 +73,7 @@ func setCustomAppMenu(app *gogpu.App, cr *atomic.Value, aboutWindow *gogpu.Windo
 //
 // Selecting a new fractal from the menu also schedules a rebuild of the "Themes" menu
 // to use the new renderer so the two menus remain in sync.
-func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]string, scheduleMenuRebuild func()) {
+func addFractalsMenu(ui *ui, shaderCode map[string]string) {
 	fractals                := fractals()
 	labels, sortedMenuItems := labels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
@@ -81,21 +84,27 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 			newFractal := fractals[name]
 			label      := labels[kind][name]
 			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() { // TODO(jbunds): disable the menu item for the fractal currently being rendered
-				curRenderer := cr.Load().(*renderer)
+				curRenderer := ui.renderer.Load().(*renderer)
 				if newFractal.kind == curRenderer.fractal.kind &&
 				   newFractal.name == curRenderer.fractal.name {
-					app.PrimaryWindow().Show()
+					ui.app.PrimaryWindow().Show()
+					ui.aboutWindowHasFocus.Store(false)
+					if ui.resumeAnimWhenShown.Load() {
+						toggleAnimation(ui.app, &ui.animToken)
+					}
 					return
 				}
 				// instantiate and initialize a new renderer with the new fractal and the current theme
+				// TODO(jbunds): close the old progress bar and instantiate a new one here
 				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
-				newRenderer.init(app, curRenderer.theme)
-				oldRenderer := cr.Swap(newRenderer).(*renderer)
+				newRenderer.init(ui.app, curRenderer.theme)
+				oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
-				scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
-				app.SetTitle(newFractal.titleText)
-				app.RequestRedraw()
-				app.PrimaryWindow().Show()
+				ui.scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
+				ui.app.SetTitle(newFractal.titleText)
+				ui.app.RequestRedraw()
+				ui.app.PrimaryWindow().Show()
+				ui.aboutWindowHasFocus.Store(false)
 			}})
 		}
 		fractalsMenu.AddItem(gogpu.MenuItem{
@@ -105,8 +114,7 @@ func addFractalsMenu(app *gogpu.App, cr *atomic.Value, shaderCode map[string]str
 	}
 
 	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
-	// TODO(jbunds): determine what causes the native "Window" menu to be removed from the menu bar
-	app.SetCustomMenu("fractals", fractalsMenu)
+	ui.app.SetCustomMenu("fractals", fractalsMenu)
 }
 
 // addWindowMenu adds a standard "Window" menu.

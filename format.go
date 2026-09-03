@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+// TODO(jbunds): refactor labels (at least it's not in the hot path...)
+
 // labels creates formatted and sorted lists of labels for UI elements as maps keyed off the given map.
 func labels(fractals map[string]*fractal) (map[string]map[string]string, map[string][]string) {
 	maxLen := make(map[string]int)
