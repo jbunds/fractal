@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -16,9 +18,9 @@ import (
 	"golang.org/x/text/language"
 )
 
-// setCustomAppMenu sets the application menu with a custom "About Fractal" manu
+// setAppMenu sets the application menu with a custom "About Fractal" manu
 // item which renders a small translucent window with some text when selected.
-func setCustomAppMenu(ui *ui) {
+func setAppMenu(ui *ui) {
 	ui.app.SetMenu(gogpu.NewMenu().
 		// TODO(jbunds): fix bug whereby selecting the custom "About Fractal" item from the
 		//               application menu incorrectly renders a new frame to the primary window
@@ -117,6 +119,25 @@ func addFractalsMenu(ctx context.Context, ui *ui, shaderCode map[string]string) 
 
 	// TODO(jbunds): determine what causes the animation to pause when the user clicks on any menu header
 	ui.app.SetCustomMenu("fractals", fractalsMenu)
+}
+
+// rebuildThemesMenu rebuilds the "Themes" menu when a new fractal is selected from the "Fractals" menu.
+// It is scheduled by the call to scheduleMenuRebuild() in addFractalsMenu() and executed during the next draw cycle by OnUpdate().
+func rebuildThemesMenu(ui *ui, shaderCode map[string]string) {
+	themesMenu := gogpu.NewMenuWithTitle("Themes")
+	for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
+		themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
+			cr := ui.renderer.Load().(*renderer)
+			if cr.theme == cs { return }
+			// apply the new theme to the current renderer
+			newRenderer := newRenderer(cr.fractal, shaderCode[cr.fractal.kind], cs)
+			newRenderer.init(ui.app, cs)
+			oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
+			oldRenderer.release()
+			ui.app.RequestRedraw()
+		}})
+	}
+	ui.app.SetCustomMenu("themes", themesMenu)
 }
 
 // addWindowMenu adds a standard "Window" menu.

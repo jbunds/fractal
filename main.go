@@ -10,11 +10,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"maps"
 	"os"
 	"os/signal"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,13 +49,13 @@ const (
 	baseIterations        = 500   // initial number of maximum iterations used to compute interior boundaries
 	paletteSize           = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
 	viewportWidth         = 3.0   // viewport width of the initial frame, i.e., the span of the complex plane rendered to the viewport
-	scaleFactor           = 0.993 // multiplicative factor by which each successive rendering is iteratively magnified
+	scaleFactor           = 0.993 // multiplicative factor by which each rendered frame is iteratively magnified
 	linearGrowthFactor    = 0.3   // multiplicative factor by which interior boundary calculation maximum iterations increase per each successive Mandelbrot fractal frame
 	quadraticGrowthFactor = 0.003 // multiplicative factor by which interior boundary calculation maximum iterations increase per the square of the Julia fractal frame count
 	maxPrecisionFrames    = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
-// state stores the application state (uniforms, color palette, viewport width, rendered frame count, and FPS).
+// state stores low-level state (color palette, viewport width, rendered frame count, and FPS, and uniforms).
 type state struct {
 	frameCount        int      // tracks the number of frames rendered
 	paletteColors     []uint32 // pre-computed color palette
@@ -69,7 +67,7 @@ type state struct {
 	cImagHi, cImagLo  float32  // complex constant term of the filled Julia set defined by 𝑓(𝑧) = 𝑧² + 𝑐
 }
 
-// gpu stores all GPU resources required to render a frame (device, buffers, compute pipeline).
+// gpu stores all GPU resources required for rendering (device, buffers, compute pipeline).
 type gpu struct {
 	device          *wgpu.Device          // logical GPU device
 	paletteTex      *wgpu.Texture         // pre-computed color palette 1D texture
@@ -90,10 +88,10 @@ type assets struct {
 	fractalViewRelease func()                 // fractal TextureView release function
 }
 
-// renderer stores most runtime state.
+// renderer stores all objects required to render a fractal.
 type renderer struct {
-	theme   string
-	fractal *fractal
+	theme   string   // color scheme (green or red)
+	fractal *fractal // fractal being rendered
 	state   *state
 	gpu     *gpu
 	assets  *assets
@@ -108,21 +106,26 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 	cRealHi,     cImagHi, cRealLo, cImagLo float32 // block 4
 }
 
-// ui encapsulates GUI state and orchestrates window and animation lifecycle.
+// ui encapsulates GUI and internal state and orchestrates animation and window lifecycle.
 type ui struct {
 	app                  *gogpu.App
 	primaryWindow,
 	aboutWindow          *gogpu.Window
+
 	renderer             atomic.Value
 	animToken            atomic.Pointer[gogpu.AnimationToken]
+
 	lastFrameTime        time.Time
 	initTokenOnce        sync.Once
+
 	pendingMenuRebuild   bool
+
 	hidePrimaryWindow,
 	hideAboutWindow,
 	aboutWindowIsOpen,
 	aboutWindowHasFocus,
 	resumeAnimWhenShown  atomic.Bool
+
 	prog                 *progress.Progress
 	progClose            func()
 }
@@ -154,22 +157,18 @@ func main() {
 
 	ui.app.SetQuitOnLastWindowClosed(false)
 
+	// trap SIGINT, SIGTERM, and SIGHUP to ensure clean progress
+	// bar shutdown so the hidden cursor is restored
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan,
 		syscall.SIGINT,  // ctrl+c
 		syscall.SIGTERM, // standard kill signal
 		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
+
 	go func() {
 		<-sigChan
-		ui.app.Quit()    // triggers OnClose() to ensure clean progress bar shutdown
+		ui.app.Quit() // triggers OnClose() to ensure clean progress bar shutdown
 	}()
-
-	removeComments := func(text string) string {
-		re := regexp.MustCompile(`(?m)^\s*//.*\n`)
-		return strings.TrimSpace(re.ReplaceAllString(text, ""))
-	}
-
-	// closures (singletons)
 
 	shaderCode := map[string]string{
 		"mandelbrot": removeComments(commonShaderCode + "\n" + mandelbrotShaderCode),
@@ -177,23 +176,6 @@ func main() {
 	}
 
 	ui.renderer.Store(newRenderer(fractal, shaderCode[fractal.kind], theme))
-
-	rebuildThemesMenu := func() { // indirectly called via OnUpdate() by addFractalsMenu when a new fractal is selected from the menu
-		themesMenu := gogpu.NewMenuWithTitle("Themes")
-		for _, cs := range slices.Sorted(maps.Keys(colorSchemes())) {
-			themesMenu.AddItem(gogpu.MenuItem{Title: cs, Action: func() { // TODO(jbunds): prepend a checkmark to the current theme menu item and disable it
-				cr := ui.renderer.Load().(*renderer)
-				if cr.theme == cs { return }
-				// apply the new theme to the current renderer
-				newRenderer := newRenderer(cr.fractal, shaderCode[cr.fractal.kind], cs)
-				newRenderer.init(ui.app, cs)
-				oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
-				oldRenderer.release()
-				ui.app.RequestRedraw()
-			}})
-		}
-		ui.app.SetCustomMenu("themes", themesMenu)
-	}
 
 	// GoGPU callback registrations and definitions
 
@@ -249,18 +231,18 @@ func main() {
 		cr := ui.renderer.Load().(*renderer)
 		cr.init(ui.app, cr.theme)
 
-		setCustomAppMenu(ui)
+		setAppMenu(ui)
 
 		addFractalsMenu(ctx, ui, shaderCode)
 
-		rebuildThemesMenu()
+		rebuildThemesMenu(ui, shaderCode)
 
 		//  TODO(jbunds): fix whatever is removing the native "Window" menu,
 		//                which may be triggered by customizing the menus per
 		//                the call to app.SetMenu() or app.SetCustomMenu() (?)
 		//
 		//                the "Window" menu only gets added without the calls to
-		//                setCustomAppMenu, addFractalsMenu, and rebuildThemesMenu
+		//                setAppMenu, addFractalsMenu, and rebuildThemesMenu
 		addWindowMenu(ui.app)
 	})
 
@@ -272,7 +254,7 @@ func main() {
 
 	ui.app.OnUpdate(func(_ float64) {
 		if ui.pendingMenuRebuild {
-			rebuildThemesMenu()
+			rebuildThemesMenu(ui, shaderCode)
 			ui.pendingMenuRebuild = false
 		}
 		if ui.hidePrimaryWindow.Swap(false) {
@@ -289,6 +271,10 @@ func main() {
 	})
 
 	ui.app.OnDraw(func(dc *gogpu.Context) {
+		ui.initTokenOnce.Do(func() {
+			ui.animToken.Store(ui.app.StartAnimation())
+		})
+
 		cr := ui.renderer.Load().(*renderer)
 		cr.draw(dc, &ui.animToken)
 
@@ -297,10 +283,6 @@ func main() {
 			cr.state.fps = float64(1000.0 / elapsed)
 		}
 		ui.lastFrameTime = time.Now()
-
-		ui.initTokenOnce.Do(func() {
-			ui.animToken.Store(ui.app.StartAnimation())
-		})
 
 		if cr.state.frameCount <= maxPrecisionFrames {
 			ui.prog.Report(1, strconv.Itoa(cr.state.frameCount))
@@ -331,7 +313,7 @@ func main() {
 		panic(err) // deferred call to ui.prog.Close() triggered here
 	}
 
-	cancel()
+	cancel() // unreachable since Run() blocks
 }
 
 // newUI creates and returns a new ui instance with a new progress bar.
@@ -341,18 +323,17 @@ func newUI(ctx context.Context) *ui {
 	return ui
 }
 
-// newProgressBar closes the previous progress bar and initializes a new one.
+// newProgressBar initializes a new progress bar, or replaces an active progress bar with a new one.
 func (u *ui) newProgressBar(ctx context.Context) {
 	if u.progClose != nil { u.progClose() }
 	u.prog = progress.New(ctx, maxPrecisionFrames, os.Stderr,
 		progress.WithTracker(progress.Fraction),
 		progress.WithTheme("magma"),
-		progress.WithPersistBar(true),
 	)
 	u.progClose = u.prog.Close
 }
 
-// pauseAnimation stops the animation if running and records whether to resume on Show().
+// pauseAnimation stops animation if running and records whether to resume on Show().
 func (u *ui) pauseAnimation() {
 	if oldToken := u.animToken.Swap(nil); oldToken != nil {
 		oldToken.Stop()
@@ -362,20 +343,20 @@ func (u *ui) pauseAnimation() {
 	}
 }
 
-// hidePrimaryWin pauses the animation and defers hiding the primary window to OnUpdate().
+// hidePrimaryWin pauses animation and defers hiding the primary window to OnUpdate().
 func (u *ui) hidePrimaryWin() {
 	u.pauseAnimation()
 	u.hidePrimaryWindow.Store(true) // defer call to primaryWindow.Hide() via OnUpdate() to avoid GoGPU internal mutex deadlock
-	u.app.RequestRedraw()           // ensure OnUpdate() fires even if the animation is paused
+	u.app.RequestRedraw()           // ensure OnUpdate() fires even if animation is paused
 }
 
 // scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
 func (u *ui) scheduleMenuRebuild() {
 	u.pendingMenuRebuild = true
-	u.app.RequestRedraw()
+	u.app.RequestRedraw() // ensure OnUpdate() fires even if animation is paused
 }
 
-// newRenderer constructs and returns the *renderer used to store runtime state.
+// newRenderer constructs and returns the *renderer used to store renderer state.
 func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 	xRealHi, xRealLo := splitFloat64(fractal.params.xReal)
 	yImagHi, yImagLo := splitFloat64(fractal.params.yImag)
@@ -565,7 +546,8 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	}
 }
 
-// drawStatus draws a rectangular box in the bottom-left corner of the main window showing some basic runtime stats.
+// drawStatus draws a rectangular box in the bottom-left corner
+// of the main window showing some basic runtime stats.
 func (r *renderer) drawStats() {
 	err := r.assets.canvas.Draw(func(cc *gg.Context) {
 		cc.DrawGPUTextureBase(r.assets.fractalView, 0, 0, mainWidth, mainHeight)
@@ -656,6 +638,12 @@ func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]
 	} else {
 		token.Store(app.StartAnimation())
 	}
+}
+
+// removeComments removes comment-only lines from WGSL shader code.
+func removeComments(text string) string {
+	commentLine := regexp.MustCompile(`(?m)^\s*//.*\n`)
+	return strings.TrimSpace(commentLine.ReplaceAllString(text, ""))
 }
 
 // splitFloat64 splits a float64 into two float32s.

@@ -11,16 +11,28 @@ import (
 func cmpOpts() cmp.Options {
 	return cmp.Options{
 		cmp.AllowUnexported(
-			assets{},     fractal{},  gpu{},
-			parameters{}, renderer{}, state{}, uniforms{},
+			ui{},    renderer{}, fractal{}, parameters{},
+			state{}, gpu{},      assets{},  uniforms{},
 		),
 		cmpopts.IgnoreUnexported(
 			gpucontext.TextureView{},
 		),
-		cmp.FilterPath(func(p cmp.Path) bool { // TODO(jbunds): clean this up
-			f, ok := p[len(p) - 1].(cmp.StructField)
-			return ok && f.Name() == "maxIter"
-		}, cmp.Ignore()),
+		cmpopts.IgnoreFields(parameters{}, "maxIter"),
+		cmpopts.IgnoreFields(ui{},
+			"app",               "renderer",            "animToken",
+			"prog",              "progClose",           "initTokenOnce",
+			"aboutWindowIsOpen", "aboutWindowHasFocus", "resumeAnimWhenShown",
+			"hidePrimaryWindow", "hideAboutWindow",
+		),
+	}
+}
+
+func TestNewUI(t *testing.T) {
+	t.Parallel()
+	want := new(ui)
+	got  := newUI(t.Context())
+	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
+		t.Errorf("newUI mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -51,8 +63,27 @@ func TestUpdateUniforms(t *testing.T) {
 		cImagHi:        9, cImagLo:   10,
 		scaleHi:       11, maxIter:   12,
 	}
-	got  := updateUniforms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+	got := updateUniforms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
 		t.Errorf("updateUniforms() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestRemoveComments(t *testing.T) {
+	t.Parallel()
+	code := `// a comment
+
+1 + 1 == 2
+
+// another comment
+
+2 + 2 == 4
+
+  // yet another comment
+`
+	want := "1 + 1 == 2\n\n2 + 2 == 4"
+	got  := removeComments(code)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("removeComments() mismatch (-want +got):\n%s", diff)
 	}
 }
