@@ -92,6 +92,7 @@ linters:
             - flag
             - image/color
             - io/fs
+            - math
             - slices
             - strings
             - testing

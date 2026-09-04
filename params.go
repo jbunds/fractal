@@ -45,11 +45,11 @@ func fractals() map[string]*fractal {
 		"scepter": {
 			kind:  "mandelbrot",
 			name:  "scepter",
-			params: &parameters{xReal: -1.45, yImag: 0.0}},
+			params: &parameters{xReal: -1.45}},
 		"spider": {
 			kind:   "mandelbrot",
 			name:   "spider",
-			params: &parameters{xReal: -1.4063, yImag: 0.0}},
+			params: &parameters{xReal: -1.4063}},
 		"starburst": {
 			kind:  "mandelbrot",
 			name:  "starburst",
@@ -81,16 +81,16 @@ func fractals() map[string]*fractal {
 		"basilica": {
 			kind:   "julia",
 			name:   "basilica",
-			params: &parameters{cReal: -0.75, cImag: 0.0, powScale: 1}},
+			params: &parameters{cReal: -0.75, powScale: 1}},
 		// TODO(jbunds): improve color gradients for the cantor dust fractal
 		"cantor": {
 			kind:   "julia",
 			name:   "cantor dust",
-			params: &parameters{cReal: 1.0, cImag: 0.0, powScale: 1}},
+			params: &parameters{cReal: 1.0, powScale: 1}},
 		"dendrite": {
 			kind:   "julia",
 			name:   "dendrite",
-			params: &parameters{cReal: 0.0, cImag: 1.0, powScale: 1}},
+			params: &parameters{cImag: 1.0, powScale: 1}},
 		// https://commons.wikimedia.org/wiki/File:Julia_set_(highres_01).jpg
 		"floyd": {
 			kind:   "julia",
@@ -140,7 +140,7 @@ func fractals() map[string]*fractal {
 		"-1.50 + 0.00i": {
 			kind:   "julia",
 			name:   "-1.50 + 0.00i",
-			params: &parameters{cReal: -1.50, cImag:  0.00, powScale: 1}},
+			params: &parameters{cReal: -1.50, powScale: 1}},
 		// https://en.wikipedia.org/wiki/Julia_set#Quadratic_polynomials
 		"-0.5125 + 0.5213i": {
 			kind:   "julia",
@@ -228,7 +228,7 @@ func kinds(fractals map[string]*fractal) []string {
 }
 
 // fractalNamesByKind returns an iterator over all fractal names of the specified kind.
-func fractalNamesByKind(fractals map[string]*fractal, kind string) iter.Seq[string] { // TODO(jbunds): clean up this and labels in ui.go
+func fractalNamesByKind(fractals map[string]*fractal, kind string) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		for name, fractal := range fractals {
 			if fractal.kind == kind {
