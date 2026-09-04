@@ -123,6 +123,8 @@ type ui struct {
 	aboutWindowIsOpen,
 	aboutWindowHasFocus,
 	resumeAnimWhenShown  atomic.Bool
+	prog                 *progress.Progress
+	progClose            func()
 }
 
 func main() {
@@ -139,7 +141,10 @@ func main() {
 	//   gogpu.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
-	ui := new(ui)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ui := newUI(ctx)
+	defer ui.progClose() // called via panic() paths (idempotent)
 
 	ui.app = gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Fractal").
@@ -148,6 +153,16 @@ func main() {
 		WithResizable(false))
 
 	ui.app.SetQuitOnLastWindowClosed(false)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan,
+		syscall.SIGINT,  // ctrl+c
+		syscall.SIGTERM, // standard kill signal
+		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
+	go func() {
+		<-sigChan
+		ui.app.Quit()    // triggers OnClose() to ensure clean progress bar shutdown
+	}()
 
 	removeComments := func(text string) string {
 		re := regexp.MustCompile(`(?m)^\s*//.*\n`)
@@ -179,26 +194,6 @@ func main() {
 		}
 		ui.app.SetCustomMenu("themes", themesMenu)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan,
-		syscall.SIGINT,  // ctrl+c
-		syscall.SIGTERM, // standard kill signal
-		syscall.SIGHUP)  // terminal closed, SSH disconnection, etc
-	go func() {
-		<-sigChan
-		ui.app.Quit() // triggers OnClose() to ensure clean progress bar shutdown
-	}()
-
-	// TODO(jbunds): instantiate a new progress bar whenever a new fractal is selected via the "Fractals" menu
-	prog := progress.New(ctx, maxPrecisionFrames, os.Stderr,
-		progress.WithTracker(progress.Fraction),
-		progress.WithTheme("magma"),
-		progress.WithPersistBar(true),
-	)
-	defer prog.Close() // called via panic() paths (idempotent)
 
 	// GoGPU callback registrations and definitions
 
@@ -256,7 +251,7 @@ func main() {
 
 		setCustomAppMenu(ui)
 
-		addFractalsMenu(ui, shaderCode)
+		addFractalsMenu(ctx, ui, shaderCode)
 
 		rebuildThemesMenu()
 
@@ -308,9 +303,9 @@ func main() {
 		})
 
 		if cr.state.frameCount <= maxPrecisionFrames {
-			prog.Report(1, strconv.Itoa(cr.state.frameCount))
+			ui.prog.Report(1, strconv.Itoa(cr.state.frameCount))
 		} else {
-			prog.Close() // normal progress bar shutdown sequence
+			ui.prog.Close() // normal progress bar shutdown sequence
 		}
 
 		if ui.animToken.Load() != nil {
@@ -322,7 +317,7 @@ func main() {
 		ui.renderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
 		cancel()
-		prog.Close()
+		ui.prog.Close()
 	})
 
 	ui.lastFrameTime = time.Now()
@@ -333,10 +328,51 @@ func main() {
 		ui.renderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
 		cancel()
-		panic(err) // deferred call to prog.Close() triggered here
+		panic(err) // deferred call to ui.prog.Close() triggered here
 	}
 
 	cancel()
+}
+
+// newUI creates and returns a new ui instance with a new progress bar.
+func newUI(ctx context.Context) *ui {
+	ui := new(ui)
+	ui.newProgressBar(ctx)
+	return ui
+}
+
+// newProgressBar closes the previous progress bar and initializes a new one.
+func (u *ui) newProgressBar(ctx context.Context) {
+	if u.progClose != nil { u.progClose() }
+	u.prog = progress.New(ctx, maxPrecisionFrames, os.Stderr,
+		progress.WithTracker(progress.Fraction),
+		progress.WithTheme("magma"),
+		progress.WithPersistBar(true),
+	)
+	u.progClose = u.prog.Close
+}
+
+// pauseAnimation stops the animation if running and records whether to resume on Show().
+func (u *ui) pauseAnimation() {
+	if oldToken := u.animToken.Swap(nil); oldToken != nil {
+		oldToken.Stop()
+		u.resumeAnimWhenShown.Store(true)
+	} else {
+		u.resumeAnimWhenShown.Store(false)
+	}
+}
+
+// hidePrimaryWin pauses the animation and defers hiding the primary window to OnUpdate().
+func (u *ui) hidePrimaryWin() {
+	u.pauseAnimation()
+	u.hidePrimaryWindow.Store(true) // defer call to primaryWindow.Hide() via OnUpdate() to avoid GoGPU internal mutex deadlock
+	u.app.RequestRedraw()           // ensure OnUpdate() fires even if the animation is paused
+}
+
+// scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
+func (u *ui) scheduleMenuRebuild() {
+	u.pendingMenuRebuild = true
+	u.app.RequestRedraw()
 }
 
 // newRenderer constructs and returns the *renderer used to store runtime state.
@@ -363,29 +399,6 @@ func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 			cImagLo:       cImagLo,
 		},
 	}
-}
-
-// pauseAnimation stops the animation if running and records whether to resume on Show().
-func (u *ui) pauseAnimation() {
-	if oldToken := u.animToken.Swap(nil); oldToken != nil {
-		oldToken.Stop()
-		u.resumeAnimWhenShown.Store(true)
-	} else {
-		u.resumeAnimWhenShown.Store(false)
-	}
-}
-
-// hidePrimaryWin pauses the animation and defers hiding the primary window to OnUpdate().
-func (u *ui) hidePrimaryWin() {
-	u.pauseAnimation()
-	u.hidePrimaryWindow.Store(true) // defer call to primaryWindow.Hide() via OnUpdate() to avoid GoGPU internal mutex deadlock
-	u.app.RequestRedraw()           // ensure OnUpdate() fires even if the animation is paused
-}
-
-// scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
-func (u *ui) scheduleMenuRebuild() {
-	u.pendingMenuRebuild = true
-	u.app.RequestRedraw()
 }
 
 // init initializes all resources required to render frames in the main application window.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -73,7 +74,7 @@ func setCustomAppMenu(ui *ui) {
 //
 // Selecting a new fractal from the menu also schedules a rebuild of the "Themes" menu
 // to use the new renderer so the two menus remain in sync.
-func addFractalsMenu(ui *ui, shaderCode map[string]string) {
+func addFractalsMenu(ctx context.Context, ui *ui, shaderCode map[string]string) {
 	fractals                := fractals()
 	labels, sortedMenuItems := labels(fractals)
 	fractalsMenu            := gogpu.NewMenuWithTitle("Fractals")
@@ -105,6 +106,7 @@ func addFractalsMenu(ui *ui, shaderCode map[string]string) {
 				ui.app.RequestRedraw()
 				ui.app.PrimaryWindow().Show()
 				ui.aboutWindowHasFocus.Store(false)
+				ui.newProgressBar(ctx)
 			}})
 		}
 		fractalsMenu.AddItem(gogpu.MenuItem{
