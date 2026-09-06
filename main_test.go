@@ -23,19 +23,10 @@ func cmpOpts() cmp.Options {
 		),
 		cmpopts.IgnoreFields(parameters{}, "maxIter"),
 		cmpopts.IgnoreFields(ui{},
-			"app",       "renderer",          "animToken",
-			"prog",      "progClose",         "initTokenOnce",
-			"animating", "hidePrimaryWindow", "hideAboutWindow",
+			"app",       "renderer",        "animToken",
+			"prog",      "progClose",       "initTokenOnce",
+			"animating", "hideAboutWindow", "hidePrimaryWindow",
 		),
-	}
-}
-
-func TestNewUI(t *testing.T) {
-	t.Parallel()
-	want := new(ui)
-	got  := newUI(t.Context())
-	if diff := cmp.Diff(want, got, cmpOpts()); diff != "" {
-		t.Errorf("newUI mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -151,7 +151,7 @@ func rebuildThemesMenu(ctx context.Context, ui *ui, shaderCode map[string]string
 }
 
 // addWindowMenu adds a standard "Window" menu.
-func addWindowMenu(app *gogpu.App) {
+func addWindowMenu(app app) {
 	// TODO(jbunds): fix this so a "Window" menu is actually added to the menu bar.
 	if winMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); winMenu != nil {
 		winMenu.AddItem(gogpu.MenuItem{Title: "Minimize",           Role: gogpu.RoleMinimize})
@@ -166,7 +166,7 @@ func addWindowMenu(app *gogpu.App) {
 }
 
 // drawAboutWindow draws the About window once on demand.
-func drawAboutWindow(app *gogpu.App, dc *gogpu.Context, cr *atomic.Value) func() {
+func drawAboutWindow(app app, dc *gogpu.Context, cr *atomic.Value) func() {
 	canvas, err := ggcanvas.New(app.GPUContextProvider(), aboutWidth, aboutHeight)
 	if err != nil {
 		panic(err)

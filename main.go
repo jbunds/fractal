@@ -108,24 +108,24 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 
 // ui encapsulates GUI and internal state and orchestrates animation and window lifecycle.
 type ui struct {
-	app                  *gogpu.App                           // stores the GoGPU App instance
-	primaryWindow,                                            // stores the primary window handle
-	aboutWindow          *gogpu.Window                        // stores the About window handle
+	app                 app                // stores the GoGPU App instance
+	primaryWindow       window             // stores the primary window handle
+	aboutWindow         *gogpu.Window      // stores the About window handle
 
-	renderer             atomic.Value                         // stores the renderer instance
-	animToken            atomic.Pointer[gogpu.AnimationToken] // stores animation state (active or paused)
+	renderer,                              // stores the renderer instance
+	animToken           atomic.Value       // stores animation state (active or paused)
 
-	lastFrameTime        time.Time                            // timestamp recorded during the previous draw cycle; used to calculate FPS
-	initTokenOnce        sync.Once                            // ensures the animation token is initialized (activated) exactly once
+	lastFrameTime       time.Time          // timestamp recorded during the previous draw cycle; used to calculate FPS
+	initTokenOnce       sync.Once          // ensures the animation token is initialized (activated) exactly once
 
-	animating,                                                // tracks persistent animation play / pause state across window visibility changes
-	pendingMenuRebuild,                                       // flag used to signal that a new fractal was selected so the "Themes" menu should be rebuilt
-	hidePrimaryWindow,                                        // defers hiding the primary window to OnUpdate() to avoid GoGPU mutex deadlock
-	hideAboutWindow,                                          // defers hiding the About window to OnUpdate() to avoid GoGPU mutex deadlock
-	aboutWindowHasFocus  atomic.Bool                          // tracks focus state of the About window so the correct window is closed when ⌘+W is pressed while both windows are visible
+	animating,                             // tracks persistent animation play / pause state across window visibility changes
+	pendingMenuRebuild,                    // flag used to signal that a new fractal was selected so the "Themes" menu should be rebuilt
+	hidePrimaryWindow,                     // defers hiding the primary window to OnUpdate() to avoid GoGPU mutex deadlock
+	hideAboutWindow,                       // defers hiding the About window to OnUpdate() to avoid GoGPU mutex deadlock
+	aboutWindowHasFocus atomic.Bool        // tracks focus state of the About window so the correct window is closed when ⌘+W is pressed while both windows are visible
 
-	prog                 *progress.Progress                   // progress bar rendered to the terminal while a fractal is being rendered
-	progClose            func()                               // stops the progress bar
+	prog                *progress.Progress // progress bar rendered to the terminal while a fractal is being rendered
+	progClose           func()             // stops the progress bar
 }
 
 func main() {
@@ -144,14 +144,15 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ui := newUI(ctx)
+	ui := new(ui)
+	ui.newProgressBar(ctx)
 	defer ui.progClose() // called via panic() paths (idempotent)
 
-	ui.app = gogpu.NewApp(gogpu.DefaultConfig().
+	ui.app = &gogpuApp{App: gogpu.NewApp(gogpu.DefaultConfig().
 		WithAppName("Fractal").
 		WithTitle(fractal.titleText).
 		WithSize(mainWidth, mainHeight).
-		WithResizable(false))
+		WithResizable(false))}
 
 	ui.app.SetQuitOnLastWindowClosed(false)
 
@@ -266,7 +267,7 @@ func main() {
 
 	ui.app.OnDraw(func(dc *gogpu.Context) {
 		ui.initTokenOnce.Do(func() {
-			ui.animToken.Store(ui.app.StartAnimation())
+			ui.animToken.Store(tokenRef{t: ui.app.StartAnimation()})
 			ui.animating.Store(true)
 		})
 
@@ -285,7 +286,7 @@ func main() {
 			ui.prog.Close() // normal progress bar shutdown sequence
 		}
 
-		if ui.animToken.Load() != nil {
+		if ui.loadToken() != nil {
 			ui.app.RequestRedraw() // renders at VSync frequency (~60 FPS)
 		}
 	})
@@ -311,13 +312,6 @@ func main() {
 	cancel() // unreachable since Run() blocks
 }
 
-// newUI creates and returns a new ui instance with a new progress bar.
-func newUI(ctx context.Context) *ui {
-	ui := new(ui)
-	ui.newProgressBar(ctx)
-	return ui
-}
-
 // newProgressBar initializes a new progress bar, or replaces an active progress bar with a new one.
 func (u *ui) newProgressBar(ctx context.Context) {
 	if u.progClose != nil { u.progClose() }
@@ -332,12 +326,13 @@ func (u *ui) newProgressBar(ctx context.Context) {
 // playing if `animating` is true and the primary window is visible; paused otherwise.
 func (u *ui) syncAnimation() {
 	if u.animating.Load() && u.primaryWindow.Visible() {
-		if u.animToken.Load() == nil {
-			u.animToken.Store(u.app.StartAnimation())
+		if u.loadToken() == nil {
+			u.animToken.Store(tokenRef{t: u.app.StartAnimation()})
 		}
 	} else {
-		if oldToken := u.animToken.Swap(nil); oldToken != nil {
+		if oldToken := u.loadToken(); oldToken != nil {
 			oldToken.Stop()
+			u.animToken.Store(tokenRef{})
 		}
 	}
 }
@@ -345,7 +340,7 @@ func (u *ui) syncAnimation() {
 // toggleAnimation toggles between pausing and resuming the animation loop,
 // e.g., when the primary window is hidden, or the space bar is pressed.
 func (u *ui) toggleAnimation() {
-	if u.animToken.Load() == nil {
+	if u.loadToken() == nil {
 		u.animating.Store(true)
 	} else {
 		u.animating.Store(false)
@@ -355,7 +350,7 @@ func (u *ui) toggleAnimation() {
 
 // hidePrimaryWin stops the active animation loop and defers hiding the primary window to OnUpdate().
 func (u *ui) hidePrimaryWin() {
-	if oldToken := u.animToken.Swap(nil); oldToken != nil {
+	if oldToken := u.loadToken(); oldToken != nil {
 		oldToken.Stop()
 	}
 	u.hidePrimaryWindow.Store(true) // defer primaryWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
@@ -374,7 +369,7 @@ func (u *ui) hideAboutWin() {
 // scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
 func (u *ui) scheduleMenuRebuild() {
 	u.pendingMenuRebuild.Store(true)
-	if u.primaryWindow.Visible() && u.animToken.Load() == nil {
+	if u.primaryWindow.Visible() && u.loadToken() == nil {
 		u.app.RequestRedraw() // ensure OnUpdate() fires if animation is paused
 	}
 }
@@ -406,7 +401,7 @@ func newRenderer(fractal *fractal, shaderCode, theme string) *renderer {
 }
 
 // init initializes all resources required to render frames in the main application window.
-func (r *renderer) init(app *gogpu.App, theme string) {
+func (r *renderer) init(app app, theme string) {
 	// TODO(jbunds): consider using a sync.Map-based main-global (singleton) cache to cache all static resources
 	//               (arguably overkill as the overhead of reinstantiating static resources is not a bottleneck)
 	//
@@ -491,14 +486,14 @@ func (r *renderer) init(app *gogpu.App, theme string) {
 }
 
 // draw renders a new frame to the canvas.
-func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.AnimationToken]) {
+func (r *renderer) draw(dc *gogpu.Context, token *atomic.Value) {
 	if r.assets.canvas.Context() == nil {
 		return
 	}
 
-	if t := token.Load(); t != nil {
+	if tr, _ := token.Load().(tokenRef); tr.t != nil {
 		if r.state.frameCount > maxPrecisionFrames { // precision exhausted (perhaps many frames ago, depending on the specific fractal)
-			t.Stop()
+			tr.t.Stop()
 			return
 		}
 		r.state.viewportWidth *= scaleFactor
@@ -662,4 +657,65 @@ func splitFloat64(v float64) (float32, float32) {
 	high := float32(v)
 	low  := float32(v - float64(high))
 	return high, low
+}
+
+// app wraps gogpu.App to facilitate testing.
+type app interface {
+	Run()                               error
+	PrimaryWindow()                     window
+	StartAnimation()                    animToken
+	RequestRedraw()
+	Quit()
+	OnSurfaceAvailable(func())         *gogpu.App
+	OnDraw(func(*gogpu.Context))       *gogpu.App
+	OnClose(func())                    *gogpu.App
+	OnUpdate(func(float64))            *gogpu.App
+	SetQuitOnLastWindowClosed(bool)    *gogpu.App
+	NewWindow(gogpu.Config)           (*gogpu.Window, error)
+	SetTitle(string)
+	SetMenu(*gogpu.Menu)
+	GetSystemMenu(gogpu.SystemMenu)    *gogpu.SystemMenuHandle
+	SetCustomMenu(string, *gogpu.Menu)
+	DeviceProvider()                    gogpu.DeviceProvider
+	EventSource()                       gpucontext.EventSource
+	GPUContextProvider()                gpucontext.DeviceProvider
+}
+
+// gogpuApp is a thin wrapper around gogpu.App.
+type gogpuApp struct {
+	*gogpu.App
+}
+
+// StartAnimation is a thin wrapper to facilitate testing.
+func (a *gogpuApp) StartAnimation() animToken {
+	return a.App.StartAnimation()
+}
+
+// PrimaryWindow is a thin wrapper to facilitate testing.
+func (a *gogpuApp) PrimaryWindow() window {
+	return a.App.PrimaryWindow()
+}
+
+// window wraps gogpu.Window to facilitate testing.
+type window interface {
+	Visible() bool
+	Show()
+	Hide()
+	SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers))
+	SetOnPointer(func(gpucontext.PointerEvent))
+	SetOnClose(func() bool)
+}
+
+// animToken wraps gogpu.AnimationToken to facilitate testing.
+type animToken interface {
+	Stop()
+}
+
+// tokenRef is a thin shim to satisfy atomic.Value requiring a non-nil interface, precluding storage of untyped nil.
+type tokenRef struct { t animToken }
+
+// loadToken is an atomic.Value loading helper to reduce type assertion boilerplate.
+func (u *ui) loadToken() animToken {
+	r, _ := u.animToken.Load().(tokenRef)
+	return r.t
 }
