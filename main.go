@@ -108,26 +108,26 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 
 // ui encapsulates GUI and internal state and orchestrates animation and window lifecycle.
 type ui struct {
-	app                  *gogpu.App
-	primaryWindow,
-	aboutWindow          *gogpu.Window
+	app                  *gogpu.App                           // stores the GoGPU App instance
+	primaryWindow,                                            // stores the primary window handle
+	aboutWindow          *gogpu.Window                        // stores the About window handle
 
-	renderer             atomic.Value
-	animToken            atomic.Pointer[gogpu.AnimationToken]
+	renderer             atomic.Value                         // stores the renderer instance
+	animToken            atomic.Pointer[gogpu.AnimationToken] // stores animation state (active or paused)
 
-	lastFrameTime        time.Time
-	initTokenOnce        sync.Once
+	lastFrameTime        time.Time                            // timestamp recorded during the previous draw cycle; used to calculate FPS
+	initTokenOnce        sync.Once                            // ensures the animation token is initialized (activated) exactly once
 
-	pendingMenuRebuild   bool
+	pendingMenuRebuild   bool                                 // flag used to signal that a new fractal was selected so the "Themes" menu should be rebuilt
 
-	hidePrimaryWindow,
-	hideAboutWindow,
-	aboutWindowIsOpen,
-	aboutWindowHasFocus,
-	resumeAnimWhenShown  atomic.Bool
+	hidePrimaryWindow,                                        // ⌘+W pressed when primary window has focus; defers hiding the window to OnUpdate()
+	hideAboutWindow,                                          // ⌘+W pressed when About window has focus; defers hiding the window to OnUpdate()
+	aboutWindowIsOpen,                                        // tracks whether the About window is open or hidden
+	aboutWindowHasFocus,                                      // tracks whether the About window has focus or not
+	resumeAnimWhenShown  atomic.Bool                          // records the animation status (active or paused) when the primary window is hidden
 
-	prog                 *progress.Progress
-	progClose            func()
+	prog                 *progress.Progress                   // progress bar rendered to the terminal while a fractal is being rendered
+	progClose            func()                               // stops the progress bar
 }
 
 func main() {
@@ -198,10 +198,9 @@ func main() {
 		ui.primaryWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 			if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
 				if ui.aboutWindowHasFocus.Load() {
-					ui.hideAboutWindow.Store(true)
-					ui.app.RequestRedraw()
+					ui.hideAboutWin()   // immediately hide the About window
 				} else if ui.primaryWindow.Visible() {
-					ui.hidePrimaryWin()
+					ui.hidePrimaryWin() // defer primaryWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
 				}
 			}
 		})
@@ -248,25 +247,23 @@ func main() {
 
 	ui.app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
 		if key == gpucontext.KeySpace { // space bar
-			toggleAnimation(ui.app, &ui.animToken)
+			ui.toggleAnimation()
 		}
 	})
 
 	ui.app.OnUpdate(func(_ float64) {
-		if ui.pendingMenuRebuild {
-			rebuildThemesMenu(ui, shaderCode)
-			ui.pendingMenuRebuild = false
+		if ui.pendingMenuRebuild {            // if a new fractal was selected
+			rebuildThemesMenu(ui, shaderCode)   // rebuild the "Themes" menu
+			ui.pendingMenuRebuild = false       // clear the flag
 		}
-		if ui.hidePrimaryWindow.Swap(false) {
-			ui.primaryWindow.Hide()
-		}
-		if ui.hideAboutWindow.Swap(false) {
-			ui.aboutWindow.Hide()
-			ui.aboutWindowIsOpen.Store(false)
-			ui.aboutWindowHasFocus.Store(false)
-			if ui.primaryWindow.Visible() {
-				ui.primaryWindow.Show()
+		if ui.hidePrimaryWindow.Swap(false) { // if ⌘+W was pressed when the primary window had focus
+			ui.primaryWindow.Hide()             // hide the primary window
+			if ui.aboutWindow.Visible() {       // if the About window is not hidden
+				ui.aboutWindow.Show()             // focus the About window
 			}
+		}
+		if ui.hideAboutWindow.Swap(false) {   // if ⌘+W was pressed when the About window had focus
+			ui.hideAboutWin()                   // immediately hide the About window and focus the primary window if not hidden
 		}
 	})
 
@@ -333,6 +330,16 @@ func (u *ui) newProgressBar(ctx context.Context) {
 	u.progClose = u.prog.Close
 }
 
+// toggleAnimation toggles between pausing and resuming the animation loop,
+// e.g., when the space bar is pressed, or when the primary window is hidden.
+func (u *ui) toggleAnimation() {
+	if oldToken := u.animToken.Swap(nil); oldToken != nil {
+		oldToken.Stop()
+	} else {
+		u.animToken.Store(u.app.StartAnimation())
+	}
+}
+
 // pauseAnimation stops animation if running and records whether to resume on Show().
 func (u *ui) pauseAnimation() {
 	if oldToken := u.animToken.Swap(nil); oldToken != nil {
@@ -346,14 +353,25 @@ func (u *ui) pauseAnimation() {
 // hidePrimaryWin pauses animation and defers hiding the primary window to OnUpdate().
 func (u *ui) hidePrimaryWin() {
 	u.pauseAnimation()
-	u.hidePrimaryWindow.Store(true) // defer call to primaryWindow.Hide() via OnUpdate() to avoid GoGPU internal mutex deadlock
-	u.app.RequestRedraw()           // ensure OnUpdate() fires even if animation is paused
+	u.hidePrimaryWindow.Store(true) // defer primaryWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
+	u.app.RequestRedraw()           // ensure OnUpdate() fires if animation is paused
+}
+
+// hideAboutWin immediately hides the About window, updates window open- and
+// focus-tracking flags, and ensures the primary window gains focus if not hidden.
+func (u *ui) hideAboutWin() {
+	u.aboutWindow.Hide()               // immediately hide the About window
+	u.aboutWindowIsOpen.Store(false)   // record the About window was hidden
+	u.aboutWindowHasFocus.Store(false) // record the About window lost focus
+	if u.primaryWindow.Visible() {     // if the primary window is not hidden
+		u.primaryWindow.Show()           // focus the primary window
+	}
 }
 
 // scheduleMenuRebuild marks the "Themes" menu for rebuild per the next OnUpdate() cycle.
 func (u *ui) scheduleMenuRebuild() {
 	u.pendingMenuRebuild = true
-	u.app.RequestRedraw() // ensure OnUpdate() fires even if animation is paused
+	u.app.RequestRedraw() // ensure OnUpdate() fires if animation is paused
 }
 
 // newRenderer constructs and returns the *renderer used to store renderer state.
@@ -627,16 +645,6 @@ func updateUniforms(
 		cRealLo:     cRealLo,
 		cImagHi:     cImagHi,
 		cImagLo:     cImagLo,
-	}
-}
-
-// toggleAnimation toggles between pausing and resuming the animation loop,
-// e.g., when the spacebar is pressed, or when the primary window is hidden.
-func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]) {
-	if oldToken := token.Swap(nil); oldToken != nil {
-		oldToken.Stop()
-	} else {
-		token.Store(app.StartAnimation())
 	}
 }
 

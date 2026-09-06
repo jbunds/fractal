@@ -53,9 +53,12 @@ func setAppMenu(ui *ui) {
 
 	ui.aboutWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
-			ui.hideAboutWindow.Store(true)      // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
-			ui.aboutWindowHasFocus.Store(false) // track which window has focus
-			ui.app.RequestRedraw()              // ensure OnUpdate() fires even if animation is paused
+			ui.hideAboutWindow.Store(true)      // defer aboutWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
+			ui.aboutWindowHasFocus.Store(false) // track the About window losing focus
+			if ui.primaryWindow.Visible() {     // if the primary window is not hidden
+				ui.primaryWindow.Show()           // focus the primary window
+			}
+			ui.app.RequestRedraw()              // ensure OnUpdate() fires if animation is paused
 		}
 	})
 
@@ -63,9 +66,13 @@ func setAppMenu(ui *ui) {
 		if release != nil {
 			release()
 		}
-		ui.hideAboutWindow.Store(true) // defer call to aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
-		ui.app.RequestRedraw()         // ensure OnUpdate() fires even if animation is paused
-		return false                   // reject native close / destroy request and hide instead to preserve window handle and callbacks
+		ui.hideAboutWindow.Store(true)    // defer aboutWindow.Hide() to avoid GoGPU internal mutex deadlock
+		ui.aboutWindowIsOpen.Store(false) // track the About window losing focus
+		if ui.primaryWindow.Visible() {
+			ui.primaryWindow.Show()
+		}
+		ui.app.RequestRedraw()            // ensure OnUpdate() fires if animation is paused
+		return false                      // reject native close / destroy request and hide instead to preserve window handle and callbacks
 	})
 }
 
@@ -89,25 +96,27 @@ func addFractalsMenu(ctx context.Context, ui *ui, shaderCode map[string]string) 
 			fractalMenu.AddItem(gogpu.MenuItem{Title: label, Action: func() { // TODO(jbunds): disable the menu item for the fractal currently being rendered
 				curRenderer := ui.renderer.Load().(*renderer)
 				if newFractal.kind == curRenderer.fractal.kind &&
-				   newFractal.name == curRenderer.fractal.name {
-					ui.app.PrimaryWindow().Show()
-					ui.aboutWindowHasFocus.Store(false)
-					if ui.resumeAnimWhenShown.Load() {
-						toggleAnimation(ui.app, &ui.animToken)
+				   newFractal.name == curRenderer.fractal.name { // current fractal selected
+					ui.primaryWindow.Show()                        // show primary window if it was hidden
+					ui.aboutWindowHasFocus.Store(false)            // record the primary window gained focus and the About window lost focus if it was open
+					if ui.resumeAnimWhenShown.Load() {             // if primary window was hidden and was animating when it was hidden
+						ui.toggleAnimation()                         // resume animation
+						ui.app.RequestRedraw()
 					}
 					return
 				}
 				// instantiate and initialize a new renderer with the new fractal and the current theme
-				// TODO(jbunds): close the old progress bar and instantiate a new one here
 				newRenderer := newRenderer(newFractal, shaderCode[newFractal.kind], curRenderer.theme)
 				newRenderer.init(ui.app, curRenderer.theme)
 				oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
 				oldRenderer.release()
-				ui.scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
 				ui.app.SetTitle(newFractal.titleText)
-				ui.app.RequestRedraw()
-				ui.app.PrimaryWindow().Show()
+				ui.primaryWindow.Show()
 				ui.aboutWindowHasFocus.Store(false)
+				if ui.animToken.Load() != nil || ui.resumeAnimWhenShown.Load() {
+					ui.animToken.Store(ui.app.StartAnimation()) // start animation when a new fractal is selected and previous fractal was animating
+				}
+				ui.scheduleMenuRebuild() // rebuild the "Themes" menu using the new renderer
 				ui.newProgressBar(ctx)
 			}})
 		}
@@ -134,6 +143,10 @@ func rebuildThemesMenu(ui *ui, shaderCode map[string]string) {
 			newRenderer.init(ui.app, cs)
 			oldRenderer := ui.renderer.Swap(newRenderer).(*renderer)
 			oldRenderer.release()
+			if ui.animToken.Load() != nil || ui.resumeAnimWhenShown.Load() {
+				ui.animToken.Store(ui.app.StartAnimation()) // start animation when a new theme is selected and fractal was animating
+			}
+			ui.primaryWindow.Show()
 			ui.app.RequestRedraw()
 		}})
 	}
