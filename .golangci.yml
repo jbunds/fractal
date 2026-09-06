@@ -95,6 +95,7 @@ linters:
             - math
             - slices
             - strings
+            - sync/atomic
             - testing
             - github.com/gogpu/gpucontext
             - github.com/google/go-cmp/cmp

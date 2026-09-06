@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/gogpu/gpucontext"
@@ -14,15 +15,17 @@ func cmpOpts() cmp.Options {
 			ui{},    renderer{}, fractal{}, parameters{},
 			state{}, gpu{},      assets{},  uniforms{},
 		),
+		cmpopts.EquateComparable(
+			atomic.Bool{},
+		),
 		cmpopts.IgnoreUnexported(
 			gpucontext.TextureView{},
 		),
 		cmpopts.IgnoreFields(parameters{}, "maxIter"),
 		cmpopts.IgnoreFields(ui{},
-			"app",               "renderer",            "animToken",
-			"prog",              "progClose",           "initTokenOnce",
-			"aboutWindowIsOpen", "aboutWindowHasFocus", "resumeAnimWhenShown",
-			"hidePrimaryWindow", "hideAboutWindow",
+			"app",       "renderer",          "animToken",
+			"prog",      "progClose",         "initTokenOnce",
+			"animating", "hidePrimaryWindow", "hideAboutWindow",
 		),
 	}
 }
