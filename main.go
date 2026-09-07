@@ -283,7 +283,7 @@ func main() {
 		if cr.state.frameCount <= maxPrecisionFrames {
 			ui.prog.Report(1, strconv.Itoa(cr.state.frameCount))
 		} else {
-			ui.prog.Close() // normal progress bar shutdown sequence
+			ui.prog.Close()
 		}
 
 		if ui.loadToken() != nil {
