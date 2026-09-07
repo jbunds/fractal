@@ -9,7 +9,7 @@ see also [COCOMO][cocomo] on Wikpedia
 
 ```
 $ date
-Thu Sep  3 15:42:34 CEST 2026
+Tue Sep  8 00:49:26 CEST 2026
 ```
 
 ```
@@ -17,21 +17,25 @@ $ scc --exclude-dir .git --include-ext go,wgsl --dryness --by-file --wide
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 Language                    Files        Lines     Blanks   Comments         Code Complexity Complexity/Lines
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Go                             12        2,053        194        145        1,714        209            12.19
-(ULOC)                                   1,305
+Go                             16        3,358        323        193        2,842        336            11.82
+(ULOC)                                   1,952
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-main.go                                    653         92         74          487         71            14.58
+main.go                                    666         96         79          491         80            16.29
+params_test.go                             493          6          0          487         12             2.46
+lifecycle_test.go                          278         45         27          206         59            28.64
 params.go                                  241         11         22          208         16             7.69
+ui.go                                      237         23         28          186         29            15.59
+main_test.go                               234         26          0          208         21            10.10
 flags_test.go                              213          4          0          209         16             7.66
-ui.go                                      204         22         20          162         23            14.20
 resources.go                               196         17          8          171         16             9.36
+ui_test.go                                 178         31          0          147         24            16.33
 format_test.go                             139          5          0          134         11             8.21
+interfaces.go                              134         21          8          105          2             1.90
 format.go                                   81         13          5           63         13            20.63
 flags.go                                    80          3          3           74         16            21.62
 fonts_test.go                               70         10          3           57         10            17.54
-resources_test.go                           59          4          0           55          4             7.27
 fonts.go                                    59          8         10           41          7            17.07
-main_test.go                                58          5          0           53          6            11.32
+resources_test.go                           59          4          0           55          4             7.27
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 WebGPU Shading Langua…          3          190         40         15          135         15            11.11
 (ULOC)                                     114
@@ -40,14 +44,14 @@ common.wgsl                                 73         11         15           4
 julia.wgsl                                  61         15          0           46          8            17.39
 mandelbrot.wgsl                             56         14          0           42          7            16.67
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Total                          15        2,243        234        160        1,849        224            12.11
+Total                          19        3,548        363        208        2,977        351            11.79
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Unique Lines of Code (ULOC)              1,416
-DRYness %                                 0.63
+Unique Lines of Code (ULOC)              2,063
+DRYness %                                 0.58
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $51,514
-Estimated Schedule Effort (organic) 4.46 months
-Estimated People Required (organic) 1.03
-Processed 69,867 bytes, 0.070 megabytes (SI)
+Estimated Cost to Develop (organic) $84,939
+Estimated Schedule Effort (organic) 5.39 months
+Estimated People Required (organic) 1.40
+Processed 109,188 bytes, 0.109 megabytes (SI)
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ```
