@@ -2,61 +2,8 @@ package main
 
 import (
 	"sync"
-	"sync/atomic"
 	"testing"
-
-	"github.com/gogpu/gogpu"
-	"github.com/gogpu/gpucontext"
 )
-
-type fakeToken struct {}
-
-func (f *fakeToken) Stop() {}
-
-type fakeApp struct {
-//	token   animToken
-	primWin window
-}
-
-func (f *fakeApp) StartAnimation()                   animToken                 { return &fakeToken{} }
-func (f *fakeApp) EventSource()                      gpucontext.EventSource    { return nil }
-func (f *fakeApp) GPUContextProvider()               gpucontext.DeviceProvider { return nil }
-func (f *fakeApp) DeviceProvider()                   gogpu.DeviceProvider      { return nil }
-func (f *fakeApp) NewWindow(gogpu.Config)           (*gogpu.Window, error)     { return nil, nil }
-func (f *fakeApp) SetTitle(string)                                             {}
-func (f *fakeApp) SetMenu(*gogpu.Menu)                                         {}
-func (f *fakeApp) GetSystemMenu(gogpu.SystemMenu)    *gogpu.SystemMenuHandle   { return nil }
-func (f *fakeApp) SetCustomMenu(string, *gogpu.Menu)                           {}
-func (f *fakeApp) OnSurfaceAvailable(func())         *gogpu.App                { return nil }
-func (f *fakeApp) OnDraw(func(*gogpu.Context))       *gogpu.App                { return nil }
-func (f *fakeApp) OnUpdate(func(float64))            *gogpu.App                { return nil }
-func (f *fakeApp) OnClose(func())                    *gogpu.App                { return nil }
-func (f *fakeApp) SetQuitOnLastWindowClosed(bool)    *gogpu.App                { return nil }
-func (f *fakeApp) PrimaryWindow()                    window                    { return f.primWin }
-func (f *fakeApp) Run()                              error                     { return nil }
-func (f *fakeApp) RequestRedraw()                                              {}
-func (f *fakeApp) Quit()                                                       {}
-
-type fakeWindow struct {
-	visible atomic.Bool
-	onKey   func(key gpucontext.Key, mods gpucontext.Modifiers)
-//	key     gpucontext.Key
-//	mods    gpucontext.Modifiers
-}
-
-func (f *fakeWindow) Visible() bool                                                   { return f.visible.Load()       }
-func (f *fakeWindow) Show()                                                           {        f.visible.Store(true)  }
-func (f *fakeWindow) Hide()                                                           {        f.visible.Store(false) }
-func (f *fakeWindow) SetOnKeyPress(fn func(_ gpucontext.Key, _ gpucontext.Modifiers)) { f.onKey = fn }
-func (f *fakeWindow) SetOnPointer(_ func(_ gpucontext.PointerEvent))                  {}
-func (f *fakeWindow) SetOnClose(_ func() bool)                                        {}
-
-// func (f *fakeWindow) press(key gpucontext.Key, mods gpucontext.Modifiers) {
-// 	f.key, f.mods = key, mods
-// 	if f.onKey != nil {
-// 		f.onKey(key, mods)
-// 	}
-// }
 
 func TestLifecycle_InitialState(t *testing.T) {
 	t.Parallel()
@@ -81,9 +28,9 @@ func TestLifecycle_ToggleAnimation(t *testing.T) {
 	ui := new(ui)
 	// simulate production setup
 	ui.app           = &fakeApp{}
-	ui.primaryWindow = &fakeWindow{}
+	ui.primaryWindow = &fakeWin{}
 	ui.animating.Store(true)
-	ui.animToken.Store(tokenRef{t: &fakeToken{}})
+	ui.animToken.Store(tokenRef{token: &fakeToken{}})
 
 	// first toggle (space bar pressed): pause
 	ui.toggleAnimation()
@@ -288,7 +235,7 @@ func TestLifecycle_ConcurrentAccess(t *testing.T) {
 	// just exercises concurrent access under -race
 	t.Parallel()
 	ui := new(ui)
-	ui.primaryWindow = &fakeWindow{}
+	ui.primaryWindow = &fakeWin{}
 
 	const goroutines = 8
 	const iterations = 500

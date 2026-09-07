@@ -93,6 +93,7 @@ linters:
             - image/color
             - io/fs
             - math
+            - os
             - slices
             - strings
             - sync
@@ -101,5 +102,7 @@ linters:
             - github.com/gogpu/gogpu
             - github.com/gogpu/gpucontext
             - github.com/google/go-cmp/cmp
+            - golang.org/x/text/cases
+            - golang.org/x/text/language
     perfsprint:
       error-format: false

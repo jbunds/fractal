@@ -61,7 +61,7 @@ func setAppMenu(ui *ui) {
 			release()
 		}
 		ui.hideAboutWindow.Store(true) // defer aboutWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
-		return false                   // reject native close / destroy request and hide instead to preserve window handle and callbacks
+		return false                   // reject the close window request and hide the window instead to preserve window handle and callbacks
 	})
 }
 

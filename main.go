@@ -109,8 +109,8 @@ type uniforms struct { // total: (2 uint32 + 14 float32) * 4 bytes == 64 bytes
 // ui encapsulates GUI and internal state and orchestrates animation and window lifecycle.
 type ui struct {
 	app                 app                // stores the GoGPU App instance
-	primaryWindow       window             // stores the primary window handle
-	aboutWindow         *gogpu.Window      // stores the About window handle
+	primaryWindow,                         // stores the primary window handle
+	aboutWindow         window             // stores the About window handle
 
 	renderer,                              // stores the renderer instance
 	animToken           atomic.Value       // stores animation state (active or paused)
@@ -207,7 +207,7 @@ func main() {
 			if ui.primaryWindow.Visible() {
 				ui.hidePrimaryWin() // defer primaryWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
 			}
-			return false // reject the close window request and hide the window instead
+			return false // reject the close window request and hide the window instead to preserve window handle and callbacks
 		})
 
 		// TODO(jbunds): fix the following bug:
@@ -267,7 +267,7 @@ func main() {
 
 	ui.app.OnDraw(func(dc *gogpu.Context) {
 		ui.initTokenOnce.Do(func() {
-			ui.animToken.Store(tokenRef{t: ui.app.StartAnimation()})
+			ui.animToken.Store(tokenRef{token: ui.app.StartAnimation()})
 			ui.animating.Store(true)
 		})
 
@@ -327,11 +327,11 @@ func (u *ui) newProgressBar(ctx context.Context) {
 func (u *ui) syncAnimation() {
 	if u.animating.Load() && u.primaryWindow.Visible() {
 		if u.loadToken() == nil {
-			u.animToken.Store(tokenRef{t: u.app.StartAnimation()})
+			u.animToken.Store(tokenRef{token: u.app.StartAnimation()})
 		}
 	} else {
-		if oldToken := u.loadToken(); oldToken != nil {
-			oldToken.Stop()
+		if token := u.loadToken(); token != nil {
+			token.Stop()
 			u.animToken.Store(tokenRef{})
 		}
 	}
@@ -350,8 +350,8 @@ func (u *ui) toggleAnimation() {
 
 // hidePrimaryWin stops the active animation loop and defers hiding the primary window to OnUpdate().
 func (u *ui) hidePrimaryWin() {
-	if oldToken := u.loadToken(); oldToken != nil {
-		oldToken.Stop()
+	if token := u.loadToken(); token != nil {
+		token.Stop()
 	}
 	u.hidePrimaryWindow.Store(true) // defer primaryWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
 }
@@ -372,6 +372,12 @@ func (u *ui) scheduleMenuRebuild() {
 	if u.primaryWindow.Visible() && u.loadToken() == nil {
 		u.app.RequestRedraw() // ensure OnUpdate() fires if animation is paused
 	}
+}
+
+// loadToken is an atomic.Value loading helper to reduce type assertion boilerplate.
+func (u *ui) loadToken() animToken {
+	r, _ := u.animToken.Load().(tokenRef)
+	return r.token
 }
 
 // newRenderer constructs and returns the *renderer used to store renderer state.
@@ -491,9 +497,9 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Value) {
 		return
 	}
 
-	if tr, _ := token.Load().(tokenRef); tr.t != nil {
+	if ref, _ := token.Load().(tokenRef); ref.token != nil {
 		if r.state.frameCount > maxPrecisionFrames { // precision exhausted (perhaps many frames ago, depending on the specific fractal)
-			tr.t.Stop()
+			ref.token.Stop()
 			return
 		}
 		r.state.viewportWidth *= scaleFactor
@@ -657,65 +663,4 @@ func splitFloat64(v float64) (float32, float32) {
 	high := float32(v)
 	low  := float32(v - float64(high))
 	return high, low
-}
-
-// app wraps gogpu.App to facilitate testing.
-type app interface {
-	Run()                               error
-	PrimaryWindow()                     window
-	StartAnimation()                    animToken
-	RequestRedraw()
-	Quit()
-	OnSurfaceAvailable(func())         *gogpu.App
-	OnDraw(func(*gogpu.Context))       *gogpu.App
-	OnClose(func())                    *gogpu.App
-	OnUpdate(func(float64))            *gogpu.App
-	SetQuitOnLastWindowClosed(bool)    *gogpu.App
-	NewWindow(gogpu.Config)           (*gogpu.Window, error)
-	SetTitle(string)
-	SetMenu(*gogpu.Menu)
-	GetSystemMenu(gogpu.SystemMenu)    *gogpu.SystemMenuHandle
-	SetCustomMenu(string, *gogpu.Menu)
-	DeviceProvider()                    gogpu.DeviceProvider
-	EventSource()                       gpucontext.EventSource
-	GPUContextProvider()                gpucontext.DeviceProvider
-}
-
-// gogpuApp is a thin wrapper around gogpu.App.
-type gogpuApp struct {
-	*gogpu.App
-}
-
-// StartAnimation is a thin wrapper to facilitate testing.
-func (a *gogpuApp) StartAnimation() animToken {
-	return a.App.StartAnimation()
-}
-
-// PrimaryWindow is a thin wrapper to facilitate testing.
-func (a *gogpuApp) PrimaryWindow() window {
-	return a.App.PrimaryWindow()
-}
-
-// window wraps gogpu.Window to facilitate testing.
-type window interface {
-	Visible() bool
-	Show()
-	Hide()
-	SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers))
-	SetOnPointer(func(gpucontext.PointerEvent))
-	SetOnClose(func() bool)
-}
-
-// animToken wraps gogpu.AnimationToken to facilitate testing.
-type animToken interface {
-	Stop()
-}
-
-// tokenRef is a thin shim to satisfy atomic.Value requiring a non-nil interface, precluding storage of untyped nil.
-type tokenRef struct { t animToken }
-
-// loadToken is an atomic.Value loading helper to reduce type assertion boilerplate.
-func (u *ui) loadToken() animToken {
-	r, _ := u.animToken.Load().(tokenRef)
-	return r.t
 }
