@@ -1,3 +1,9 @@
+[![Go Version](https://img.shields.io/badge/go-%20v1.27.1-blue?logo=go)](https://github.com/jbunds/fractal/blob/main/go.mod) &nbsp;
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit) &nbsp;
+[![tests](https://github.com/jbunds/fractal/actions/workflows/go-test.yml/badge.svg)](https://github.com/jbunds/fractal/actions/workflows/go-test.yml) &nbsp;
+[![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jbunds/def916a38219b8da20c6714eca69684d/raw/coverage.json)](https://github.com/jbunds/fractal/actions/workflows/go-test.yml) &nbsp;
+[![lint](https://github.com/jbunds/fractal/actions/workflows/go-lint.yml/badge.svg)](https://github.com/jbunds/fractal/actions/workflows/go-lint.yml)
+
 [gogpu]:  https://github.com/gogpu/gogpu
 [wgsl]:   https://en.wikipedia.org/wiki/WebGPU_Shading_Language
 [smooth]: https://github.com/jbunds/fractal/blob/0952d1fc97c15ef0f1f8ce775194c7023719e7ad/resources.go#L77

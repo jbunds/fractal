@@ -1,0 +1,19 @@
+name: deploy coverage report to Pages
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/*.go'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.go'
+  workflow_dispatch: # allows this workflow to be manually triggered from the UI
+
+jobs:
+  deploy-coverage-report:
+    permissions:      # required permissions for the GITHUB_TOKEN to deploy to GitHub Pages
+      contents: write # allows pushing git notes (i.e. `git push origin refs/notes/gocoverage`)
+      pages:    write # allows the workflow to manage the lifecycle of GitHub Pages
+      id-token: write # required by actions/deploy-pages
+    uses: jbunds/coverage/.github/workflows/pages.yml@v1

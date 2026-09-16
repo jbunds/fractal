@@ -1,0 +1,50 @@
+# https://docs.github.com/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go test
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/*.go'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.go'
+  workflow_dispatch: # allows this workflow to be manually triggered from the UI
+
+permissions:      # https://docs.github.com/actions/reference/workflows-and-actions/workflow-syntax#permissions
+  contents: write # https://docs.github.com/rest/authentication/permissions-required-for-github-apps?apiVersion=2026-03-10#repository-permissions-for-contents
+
+jobs:
+  test:
+    runs-on: ubuntu-latest # https://docs.github.com/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for--private-repositories
+    steps:
+
+    - uses: actions/checkout@v7 # http://github.com/actions/checkout
+      with:
+        fetch-depth: 10         # https://github.com/gwatts/go-coverage-action#example-workflow
+
+    - uses: actions/setup-go@v7 # http://github.com/actions/setup-go
+      with:
+        go-version-file: go.mod # https://github.com/actions/setup-go/blob/main/docs/advanced-usage.md#using-the-go-version-file-input
+
+    - name: test                # https://pkg.go.dev/cmd/go#hdr-Testing_functions
+      id:   test
+      run:  go test -race ./...
+
+    - name: coverage report
+      id:   coverage_report
+      uses: jbunds/coverage@v1
+      with:
+        coverage-threshold: 50 # https://github.com/gwatts/go-coverage-action#usage
+
+    - name: update coverage badge # https://github.com/schneegans/dynamic-badges-action#%EF%B8%8F-configuration
+      uses: schneegans/dynamic-badges-action@v1.9.0
+      with:
+        auth:     ${{ secrets.GIST_SECRET }}
+        gistID:   def916a38219b8da20c6714eca69684d
+        filename: coverage.json
+        label:    coverage
+        message:  ${{ fromJson(steps.coverage_report.outputs.all).coverage-pct-1dp }}%
+        color:    ${{ fromJson(steps.coverage_report.outputs.all).meets-threshold == 'true' && 'green' || 'red' }}
