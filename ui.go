@@ -44,16 +44,23 @@ func setAppMenu(ui *ui) {
 		release  func()
 	)
 
-	ui.aboutWindow.SetOnDraw(func(dc *gogpu.Context) {
-		drawOnce.Do(func() {
-			release = drawAboutWindow(ui.app, dc, &ui.renderer)
-		})
+	// TODO(jbunds): investigate why pointer events clicking on the About window are routed to the primary window's SetOnPointer handler instead of here
+	ui.aboutWindow.SetOnPointer(func(e gpucontext.PointerEvent) {
+		if e.Type == gpucontext.PointerDown {
+			ui.aboutWindowHasFocus.Store(true)
+		}
 	})
 
 	ui.aboutWindow.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
 		if mods.HasSuper() && key == gpucontext.KeyW { // ⌘+W
 			ui.hideAboutWindow.Store(true) // defer aboutWindow.Hide() to OnUpdate() to avoid GoGPU internal mutex deadlock
 		}
+	})
+
+	ui.aboutWindow.SetOnDraw(func(dc *gogpu.Context) {
+		drawOnce.Do(func() {
+			release = drawAboutWindow(ui.app, dc, &ui.renderer)
+		})
 	})
 
 	ui.aboutWindow.SetOnClose(func() bool {
