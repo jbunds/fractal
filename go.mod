@@ -1,4 +1,4 @@
-module fractal
+module github.com/jbunds/fractal
 
 go 1.27.1
 

@@ -15,19 +15,19 @@ type app interface {
 	SetTitle(string)
 	SetMenu(*gogpu.Menu)
 	SetCustomMenu(string, *gogpu.Menu)
-	Run()                               error
-	PrimaryWindow()                     window
-	StartAnimation()                    animToken
-	OnSurfaceAvailable(func())         *gogpu.App
-	OnDraw(func(*gogpu.Context))       *gogpu.App
-	OnClose(func())                    *gogpu.App
-	OnUpdate(func(float64))            *gogpu.App
-	SetQuitOnLastWindowClosed(bool)    *gogpu.App
-	NewWindow(gogpu.Config)           (*gogpu.Window, error)
-	GetSystemMenu(gogpu.SystemMenu)     systemMenuHandle
-	DeviceProvider()                    gogpu.DeviceProvider
-	EventSource()                       gpucontext.EventSource
-	GPUContextProvider()                gpucontext.DeviceProvider
+	Run()                              error
+	PrimaryWindow()                    window
+	StartAnimation()                   animToken
+	OnSurfaceAvailable(func())        *gogpu.App
+	OnDraw(func(*gogpu.Context))      *gogpu.App
+	OnClose(func())                   *gogpu.App
+	OnUpdate(func(float64))           *gogpu.App
+	SetQuitOnLastWindowClosed(bool)   *gogpu.App
+	NewWindow(gogpu.Config)          (*gogpu.Window, error)
+	GetSystemMenu(gogpu.SystemMenu)    systemMenuHandle
+	DeviceProvider()                   gogpu.DeviceProvider
+	EventSource()                      gpucontext.EventSource
+	GPUContextProvider()               gpucontext.DeviceProvider
 }
 
 // wraps gogpu.App.
