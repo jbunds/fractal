@@ -29,22 +29,23 @@ func setAppMenu(ui *ui) {
 			ui.aboutWindowHasFocus.Store(true) // record that the About window gained focus
 		}}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Settings…",     Role: gogpu.RolePreferences}).
+		AddItem(gogpu.MenuItem{Title: "Settings…",    Role: gogpu.RolePreferences}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Services",      Role: gogpu.RoleServices}).
+		AddItem(gogpu.MenuItem{Title: "Services",     Role: gogpu.RoleServices}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Hide Fractal",  Role: gogpu.RoleHide}).
-		AddItem(gogpu.MenuItem{Title: "Hide Others",   Role: gogpu.RoleHideOthers}).
-		AddItem(gogpu.MenuItem{Title: "Show All",      Role: gogpu.RoleShowAll}).
+		AddItem(gogpu.MenuItem{Title: "Hide Fractal", Role: gogpu.RoleHide}).
+		AddItem(gogpu.MenuItem{Title: "Hide Others",  Role: gogpu.RoleHideOthers}).
+		AddItem(gogpu.MenuItem{Title: "Show All",     Role: gogpu.RoleShowAll}).
 		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Quit Fractal",  Role: gogpu.RoleQuit, Action: func() { ui.app.Quit() }}))
+		AddItem(gogpu.MenuItem{Title: "Quit Fractal", Role: gogpu.RoleQuit, Action: func() { ui.app.Quit() }}))
 
 	var (
 		drawOnce sync.Once
 		release  func()
 	)
 
-	// TODO(jbunds): investigate why pointer events clicking on the About window are routed to the primary window's SetOnPointer handler instead of here
+	// TODO(jbunds): investigate why pointer events clicking on the About window are routed
+	//               to the primary window's SetOnPointer handler instead of here
 	ui.aboutWindow.SetOnPointer(func(e gpucontext.PointerEvent) {
 		if e.Type == gpucontext.PointerDown {
 			ui.aboutWindowHasFocus.Store(true)
