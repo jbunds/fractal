@@ -143,6 +143,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	ui := new(ui)
 	ui.newProgressBar(ctx)
@@ -305,11 +306,8 @@ func main() {
 	if err := ui.app.Run(); err != nil {
 		ui.renderer.Load().(*renderer).release()
 		gg.CloseAccelerator()
-		cancel()
-		panic(err) // deferred call to ui.prog.Close() triggered here
+		panic(err) // deferred calls (cancel(), ui.prog.Close()) triggered here
 	}
-
-	cancel() // unreachable since Run() blocks
 }
 
 // newProgressBar initializes a new progress bar, or replaces an active progress bar with a new one.
