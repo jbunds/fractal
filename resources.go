@@ -18,14 +18,14 @@ type colorScheme struct {
 
 func colorSchemes() map[string]colorScheme {
 	return map[string]colorScheme{
-		"green": colorScheme{
+		"green": {
 			c1r:  25.0, c1g:  30.0, c1b:  28.0,
 			c2r: 105.0, c2g: 125.0, c2b: 100.0,
 			c3r: 215.0, c3g: 135.0, c3b:  30.0,
 			c4r: 245.0, c4g: 200.0, c4b:  35.0,
 			c5r: 245.0, c5g: 240.0, c5b: 225.0,
 		},
-		"red": colorScheme{
+		"red": {
 			c1r:  40.0, c1g:   5.0, c1b:   5.0,
 			c2r: 180.0, c2g:  20.0, c2b:  10.0,
 			c3r: 255.0, c3g:  80.0, c3b:  10.0,
@@ -136,7 +136,7 @@ func initUniformBuf(device *wgpu.Device) *wgpu.Buffer {
 // initBindGroupLayouts initializes the resource bindings for the GPU shader.
 func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.BindGroupLayout) {
 	bgLayout0, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{    // uniforms
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -156,7 +156,7 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 	}
 
 	bgLayout1, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{{ // storage texture (physical screen)
+		Entries: []gputypes.BindGroupLayoutEntry{{ // storage texture (physical screen)
 			Binding:        0,
 			Visibility:     wgpu.ShaderStageCompute,
 			StorageTexture: &gputypes.StorageTextureBindingLayout{

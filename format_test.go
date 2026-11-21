@@ -16,27 +16,27 @@ func TestLabels(t *testing.T) {
 	}{{
 		name:     "validate formatting, special handling of golden, and unnamed fractal menu items are listed last",
 		fractals: map[string]*fractal{
-			"foo": &fractal{
+			"foo": {
 				kind:   "mandelbrot",
 				name:   "foo",
 				params: &parameters{xReal: -2, yImag: 1},
 			},
-			"bar": &fractal{
+			"bar": {
 				kind:   "mandelbrot",
 				name:   "bar",
 				params: &parameters{xReal: -1, yImag: 2},
 			},
-			"+1, -1i": &fractal{
+			"+1, -1i": {
 				kind:   "mandelbrot",
 				name:   "+1, -1",
 				params: &parameters{xReal: 1, yImag: -1},
 			},
-			"golden": &fractal{
+			"golden": {
 				kind:   "julia",
 				name:   "golden",
 				params: &parameters{cReal: 2, cImag: -2},
 			},
-			"-1 + 1i": &fractal{
+			"-1 + 1i": {
 				kind:   "julia",
 				name:   "-1 + 1i",
 				params: &parameters{cReal: -1, cImag: 1},
@@ -54,12 +54,12 @@ func TestLabels(t *testing.T) {
 			},
 		},
 		wantMenuItems: map[string][]string{
-			"mandelbrot": []string{
+			"mandelbrot": {
 				"bar",
 				"foo",
 				"+1, -1i",
 			},
-			"julia":      []string{
+			"julia":      {
 				"golden",
 				"-1 + 1i",
 			},

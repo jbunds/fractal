@@ -604,7 +604,6 @@ func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
 // release marks resources for deallocation.
 func (r *renderer) release() {
 	r.assets.fractalViewRelease()
-	r.assets.canvas.Close()
 	r.assets.fontSource.Close()
 	r.assets.paletteView.Release()
 	r.gpu.pipeline.Release()
